@@ -34,6 +34,12 @@ async def main():
 
     llm_router = LLMRouter(cfg.llm)
 
+    # Восстановление сохраненных моделей для каждого провайдера
+    for prov in ["openrouter", "groq", "gemini", "local"]:
+        saved_m = storage.get_setting(f"model_{prov}")
+        if saved_m:
+            llm_router.set_model(prov, saved_m)
+
     # Инициализация сборщика дайджеста
     digest_builder = DigestBuilder(storage, llm_router)
 

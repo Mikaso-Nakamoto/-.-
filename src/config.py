@@ -90,3 +90,10 @@ def load_sources() -> Dict[str, Any]:
     if not sources_path.exists():
         sources_path = BASE_DIR / "config" / "sources.example.yaml"
     return load_yaml(sources_path)
+
+def load_prompts() -> Dict[str, Any]:
+    prompts_path = BASE_DIR / "config" / "prompts.yaml"
+    if not prompts_path.exists():
+        prompts_path = BASE_DIR / "config" / "prompts.example.yaml"
+    return load_yaml(prompts_path)
+

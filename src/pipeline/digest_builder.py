@@ -81,7 +81,7 @@ class DigestBuilder:
         user_prompt = build_digest_user_prompt(raw_text, interests, blacklist)
 
         logger.info("Отправка сформированного пакета новостей в LLM...")
-        llm_res = await self.router.generate_response(DIGEST_SYSTEM_PROMPT, user_prompt)
+        llm_res = await self.router.generate_response(task="digest", user_prompt=user_prompt)
 
         if not llm_res.get("success"):
             return {
