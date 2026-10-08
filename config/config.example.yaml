@@ -30,7 +30,7 @@ llm:
   openrouter:
     enabled: true
     api_key: "sk-or-v1-..."
-    model: "meta-llama/llama-3.3-70b-instruct:free"
+    model: "google/gemini-2.0-flash-exp:free"
 
 scheduler:
   digest_cron: "50 8 * * *" # Каждый день в 08:50
