@@ -12,9 +12,10 @@ llm:
 
   local:
     enabled: true
-    base_url: "http://192.168.1.150:11434/v1" # IP вашего основного ПК с Qwen 2.5
-    model: "qwen2.5:7b-instruct-q4_K_M"
-    api_key: "ollama"
+    # LM Studio по умолчанию слушает порт 1234 (например http://192.168.1.150:1234/v1)
+    base_url: "http://192.168.1.150:1234/v1"
+    model: "qwen2.5-7b-instruct" # или имя модели, загруженной в LM Studio
+    api_key: "lm-studio"
 
   groq:
     enabled: true
