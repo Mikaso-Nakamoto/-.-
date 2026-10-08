@@ -77,8 +77,14 @@ class DigestBuilder:
         prefs = load_preferences()
         interests = prefs.get("interests", [])
         blacklist = prefs.get("filters", {}).get("blacklist", [])
+        learned_prefs = self.storage.get_learned_preferences_summary()
 
-        user_prompt = build_digest_user_prompt(raw_text, interests, blacklist)
+        user_prompt = build_digest_user_prompt(
+            raw_items_text=raw_text,
+            user_interests=interests,
+            blacklist=blacklist,
+            learned_preferences=learned_prefs
+        )
 
         logger.info("Отправка сформированного пакета новостей в LLM...")
         llm_res = await self.router.generate_response(task="digest", user_prompt=user_prompt)

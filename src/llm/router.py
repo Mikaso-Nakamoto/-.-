@@ -1,9 +1,11 @@
 import logging
 import time
+from datetime import datetime
 from typing import Optional, Dict, Any, Tuple, List
 import httpx
 from openai import AsyncOpenAI
 from src.config import LLMConfig, load_prompts
+from src.llm.prompts import clean_telegram_markdown
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +76,6 @@ class LLMRouter:
         if task == "chat":
             return prompts.get("direct_chat", "Ты полезный и умный ИИ-ассистент.")
 
-        # Для утреннего дайджеста выбираем промпт под класс модели
         m_lower = model.lower()
         if provider == "local":
             return prompts.get("local_qwen") or prompts.get("lightweight_models")
@@ -82,11 +83,9 @@ class LLMRouter:
         if provider == "gemini" or "gemini" in m_lower:
             return prompts.get("massive_context") or prompts.get("heavy_models")
 
-        # Если модель маленькая (8B / Nemo)
         if "8b" in m_lower or "nemo" in m_lower or "mini" in m_lower:
             return prompts.get("lightweight_models") or prompts.get("local_qwen")
 
-        # Если модель крупная (70B, 72B, R1, Pro)
         return prompts.get("heavy_models")
 
     async def check_local_health(self) -> bool:
@@ -147,8 +146,22 @@ class LLMRouter:
 
         return None, None
 
-    async def generate_response(self, task: str, user_prompt: str, override_system_prompt: Optional[str] = None) -> Dict[str, Any]:
-        """Универсальная генерация ответа с поддержкой авто-переключения (fallback) и дифференцированных промптов"""
+    async def generate_response(
+        self,
+        task: str,
+        user_prompt: str,
+        override_system_prompt: Optional[str] = None,
+        chat_history: Optional[List[Dict[str, str]]] = None,
+        latest_digest: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Универсальная генерация ответа с поддержкой:
+        - failover переключения
+        - промптов под мощность моделей
+        - инъекции текущей даты и времени
+        - контекста последних новостей
+        - очистки от мусорных Markdown заголовков (###)
+        """
         start_time = time.time()
         providers_to_try = []
 
@@ -171,19 +184,45 @@ class LLMRouter:
             if not client or not model:
                 continue
 
-            system_prompt = override_system_prompt or self.get_prompt_for_model(prov, model, task=task)
+            base_sys_prompt = override_system_prompt or self.get_prompt_for_model(prov, model, task=task)
+
+            # Если задача — диалог (chat), добавляем динамический контекст реального времени и новостей
+            if task == "chat":
+                now = datetime.now()
+                days = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"]
+                date_context = (
+                    f"ТЕКУЩАЯ ДАТА И ВРЕМЯ НА СЕРВЕРЕ: {days[now.weekday()]}, {now.strftime('%d.%m.%Y, %H:%M')}.\n"
+                    f"Ты абсолютно точно знаешь текущую дату, год ({now.year}) и время.\n"
+                    f"Помни: в Telegram не работают решетки ###. Выделяй жирным шрифтом *текст*."
+                )
+                system_prompt = f"{base_sys_prompt}\n\n{date_context}"
+
+                if latest_digest:
+                    system_prompt += (
+                        f"\n\nСВЕДЕНИЯ ИЗ ПОСЛЕДНЕГО ВЫПУСКА НОВОСТЕЙ СЕРВЕРА (ты в курсе этих событий и можешь отвечать по ним):\n"
+                        f"{latest_digest[:4000]}"
+                    )
+            else:
+                system_prompt = base_sys_prompt
+
+            # Формируем цепочку сообщений
+            messages = [{"role": "system", "content": system_prompt}]
+            if chat_history:
+                for h in chat_history:
+                    messages.append({"role": h["role"], "content": h["content"]})
+            messages.append({"role": "user", "content": user_prompt})
 
             try:
                 logger.info(f"Запрос к LLM [{prov}], модель: {model}, задача: {task}...")
                 resp = await client.chat.completions.create(
                     model=model,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt}
-                    ],
-                    temperature=0.4 if task == "digest" else 0.7
+                    messages=messages,
+                    temperature=0.3 if task == "digest" else 0.7
                 )
-                content = resp.choices[0].message.content
+                raw_content = resp.choices[0].message.content
+                # Очистка от мусорных заголовков ### для Telegram
+                content = clean_telegram_markdown(raw_content)
+
                 elapsed = round(time.time() - start_time, 2)
                 return {
                     "success": True,

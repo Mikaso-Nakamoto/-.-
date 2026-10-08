@@ -1,7 +1,13 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from src.llm.router import POPULAR_MODELS
 
-def get_main_menu_keyboard() -> InlineKeyboardMarkup:
+def get_main_menu_keyboard(chat_mode: bool = False) -> InlineKeyboardMarkup:
+    chat_btn = (
+        InlineKeyboardButton(text="🔴 Завершить режим чата", callback_data="btn_chat_stop")
+        if chat_mode
+        else InlineKeyboardButton(text="💬 Режим диалога (Чат)", callback_data="btn_chat_start")
+    )
+
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="📰 Дайджест сейчас", callback_data="btn_run_digest"),
@@ -9,21 +15,43 @@ def get_main_menu_keyboard() -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(text="🧠 Выбор нейросети", callback_data="btn_select_provider"),
-            InlineKeyboardButton(text="🎯 Модели провайдеров", callback_data="btn_browse_models")
+            InlineKeyboardButton(text="🎯 Модели", callback_data="btn_browse_models")
         ],
         [
-            InlineKeyboardButton(text="📡 Источники", callback_data="btn_sources"),
-            InlineKeyboardButton(text="💬 Режим чата", callback_data="btn_chat_info")
+            chat_btn,
+            InlineKeyboardButton(text="📡 Источники", callback_data="btn_sources")
+        ]
+    ])
+
+def get_chat_control_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🔴 Завершить диалог", callback_data="btn_chat_stop"),
+            InlineKeyboardButton(text="🧹 Очистить память диалога", callback_data="btn_chat_clear")
+        ],
+        [
+            InlineKeyboardButton(text="🏠 Главное меню", callback_data="btn_menu")
+        ]
+    ])
+
+def get_digest_feedback_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="👍 Отличная подборка", callback_data="fb_like"),
+            InlineKeyboardButton(text="👎 Слишком много мусора", callback_data="fb_dislike")
+        ],
+        [
+            InlineKeyboardButton(text="💬 Обсудить этот дайджест с ИИ", callback_data="btn_chat_start")
         ]
     ])
 
 def get_provider_selection_keyboard(current_provider: str) -> InlineKeyboardMarkup:
     providers = [
-        ("🔄 Auto (Local -> Cloud Fallback)", "prov_auto"),
-        ("🖥 Локальный ПК (Qwen 2.5 в LM Studio)", "prov_local"),
-        ("⚡️ GroqCloud (LPU Ultra-Fast)", "prov_groq"),
+        ("🔄 Auto (Local -> Cloud Failover)", "prov_auto"),
+        ("🖥 Локальный ПК (LM Studio)", "prov_local"),
+        ("⚡️ GroqCloud (Ultra-Fast LPU)", "prov_groq"),
         ("🌐 Google Gemini (Flash / Pro)", "prov_gemini"),
-        ("🔀 OpenRouter (Free Pool ~25 моделей)", "prov_openrouter")
+        ("🔀 OpenRouter (Free Pool)", "prov_openrouter")
     ]
 
     buttons = []
@@ -52,7 +80,7 @@ def get_models_keyboard(provider: str, current_model: str) -> InlineKeyboardMark
 
 def get_provider_browser_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔀 Модели OpenRouter (Free)", callback_data="viewmods_openrouter")],
+        [InlineKeyboardButton(text="🔀 Бесплатные модели OpenRouter", callback_data="viewmods_openrouter")],
         [InlineKeyboardButton(text="⚡️ Модели GroqCloud", callback_data="viewmods_groq")],
         [InlineKeyboardButton(text="🌐 Модели Google Gemini", callback_data="viewmods_gemini")],
         [InlineKeyboardButton(text="🔙 Главное меню", callback_data="btn_menu")]
