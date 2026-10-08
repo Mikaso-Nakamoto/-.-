@@ -1,0 +1,30 @@
+services:
+  # Основной сервис: Telegram-бот, планировщик 08:50, парсеры и LLM-роутер
+  ai-agent:
+    build: .
+    container_name: tg-ai-news-hub
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./config:/app/config
+      - ./data:/app/data
+    environment:
+      - PYTHONUNBUFFERED=1
+    extra_hosts:
+      # Позволяет контейнеру обращаться к хосту (ноутбуку) или локальным IP
+      - "host.docker.internal:host-gateway"
+
+  # Опционально: локальный RSSHub для конвертации твитов и закрытых сайтов в RSS
+  # Запускается по команде: docker compose --profile rsshub up -d
+  rsshub:
+    image: diygod/rsshub:chromium-bundled
+    container_name: rsshub-service
+    restart: unless-stopped
+    profiles: ["rsshub"]
+    ports:
+      - "1200:1200"
+    environment:
+      - NODE_ENV=production
+      - CACHE_TYPE=memory
+      - LISTEN_INADDR_ANY=1

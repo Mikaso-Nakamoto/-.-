@@ -1,0 +1,36 @@
+bot:
+  token: "YOUR_TELEGRAM_BOT_TOKEN"
+  admin_id: 123456789 # Ваш Telegram ID для авторизации и отправки сводок
+
+storage:
+  db_path: "data/bot_database.db"
+
+llm:
+  # Текущий режим работы: auto, local, groq, gemini, openrouter
+  default_provider: "auto"
+  timeout_seconds: 60
+
+  local:
+    enabled: true
+    base_url: "http://192.168.1.150:11434/v1" # IP вашего основного ПК с Qwen 2.5
+    model: "qwen2.5:7b-instruct-q4_K_M"
+    api_key: "ollama"
+
+  groq:
+    enabled: true
+    api_key: "gsk_..."
+    model: "llama-3.3-70b-versatile"
+
+  gemini:
+    enabled: true
+    api_key: "AIzaSy..."
+    model: "gemini-1.5-flash" # или gemini-2.0-flash
+
+  openrouter:
+    enabled: true
+    api_key: "sk-or-v1-..."
+    model: "meta-llama/llama-3.3-70b-instruct:free"
+
+scheduler:
+  digest_cron: "50 8 * * *" # Каждый день в 08:50
+  fetch_interval_minutes: 30 # Фоновый сбор новостей каждые 30 мин
