@@ -145,10 +145,12 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
                 pass
 
     # --------------------------------------------------------------------------
-    # Главное меню (Команда /start или кнопка "Главное меню")
+    # Главное меню (Команда /start или кнопка "Главное меню", а также слова "старт", "меню")
     # --------------------------------------------------------------------------
-    @r.message(Command("start"))
+    @r.message(Command("start", "menu", "help"))
+    @r.message(F.text.lower().in_(["старт", "start", "меню", "menu", "привет", "главное меню", "/start", "/menu", "/help"]))
     async def cmd_start_msg(msg: Message, state: FSMContext):
+        logger.info(f"📩 Команда СТАРТ/МЕНЮ от пользователя ID={msg.from_user.id} (@{msg.from_user.username})")
         if not is_admin(msg.from_user.id):
             await msg.answer(
                 f"⛔️ <b>Доступ ограничен.</b>\n\n"
@@ -253,6 +255,15 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
     @r.message(Command("digest"))
     @r.callback_query(F.data == "btn_run_digest")
     async def cmd_digest(event: Message | CallbackQuery):
+        user_id = event.from_user.id
+        logger.info(f"⚡️ Запуск дайджеста от ID={user_id}")
+        if not is_admin(user_id):
+            if isinstance(event, CallbackQuery):
+                await event.answer("⛔️ Доступ ограничен", show_alert=True)
+            else:
+                await event.answer(f"⛔️ Доступ ограничен. Ваш ID: {user_id}")
+            return
+
         msg = event if isinstance(event, Message) else event.message
         if isinstance(event, CallbackQuery):
             await event.answer("Сбор публикаций и генерация дайджеста...")
@@ -347,7 +358,16 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
     @r.message(Command("sources"))
     @r.callback_query(F.data == "btn_sources")
     async def cmd_sources(event: Message | CallbackQuery, state: FSMContext):
+        user_id = event.from_user.id
+        logger.info(f"📡 Запрос меню источников от ID={user_id}")
         await state.clear()
+        if not is_admin(user_id):
+            if isinstance(event, CallbackQuery):
+                await event.answer("⛔️ Доступ ограничен", show_alert=True)
+            else:
+                await send_safe_reply(event, f"⛔️ Доступ ограничен. Ваш ID: {user_id}")
+            return
+
         tg_channels = get_telegram_channels()
         rss_feeds = get_rss_feeds()
 
@@ -575,6 +595,15 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
     @r.message(Command("model"))
     @r.callback_query(F.data == "btn_select_provider")
     async def cmd_model(event: Message | CallbackQuery):
+        user_id = event.from_user.id
+        logger.info(f"🧠 Запрос выбора провайдера от ID={user_id}")
+        if not is_admin(user_id):
+            if isinstance(event, CallbackQuery):
+                await event.answer("⛔️ Доступ ограничен", show_alert=True)
+            else:
+                await send_safe_reply(event, f"⛔️ Доступ ограничен. Ваш ID: {user_id}")
+            return
+
         kb = get_provider_selection_keyboard(llm_router.active_provider)
         text = "🧠 *Выберите активного ИИ-провайдера:*"
 
@@ -627,6 +656,15 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
     @r.message(Command("status"))
     @r.callback_query(F.data == "btn_status")
     async def cmd_status(event: Message | CallbackQuery):
+        user_id = event.from_user.id
+        logger.info(f"📊 Запрос статуса от ID={user_id}")
+        if not is_admin(user_id):
+            if isinstance(event, CallbackQuery):
+                await event.answer("⛔️ Доступ ограничен", show_alert=True)
+            else:
+                await send_safe_reply(event, f"⛔️ Доступ ограничен. Ваш ID: {user_id}")
+            return
+
         local_on = await llm_router.check_local_health()
         tz_name = scheduler.timezone_name if scheduler else "Europe/Moscow"
         next_run = scheduler.get_next_run_time() if scheduler else "08:50"
@@ -690,7 +728,17 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
     # --------------------------------------------------------------------------
     @r.message(F.text & ~F.text.startswith("/"))
     async def on_user_chat_message(msg: Message):
+        logger.info(f"📩 Сообщение в чат от ID={msg.from_user.id}: {msg.text[:50]}")
         if not is_admin(msg.from_user.id):
+            await msg.answer(
+                f"⛔️ <b>Доступ ограничен.</b>\n\n"
+                f"Ваш Telegram ID: <code>{msg.from_user.id}</code>\n"
+                f"ID администратора бота: <code>{configured_admin_id}</code>\n\n"
+                f"Если это ваш бот, укажите:\n"
+                f"<code>TELEGRAM_ADMIN_ID={msg.from_user.id}</code>\n"
+                f"в файле <code>.env</code> на сервере и перезапустите контейнер.",
+                parse_mode="HTML"
+            )
             return
 
         # Если режим чата выключен — подсказываем, как включить
