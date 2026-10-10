@@ -408,7 +408,7 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
             "📢 <b>Добавление Telegram-канала</b>\n\n"
             "Отправьте в чат <b>@юзернейм</b> канала или ссылку на него.\n\n"
             "<i>Примеры:</i>\n"
-            "• <code>@neuralmeduza</code>\n"
+            "• <code>@xakep_ru</code>\n"
             "• <code>https://t.me/ai_newz</code>\n"
             "• <code>habr_com</code>\n\n"
             "<i>Канал должен быть публичным (с открытым веб-просмотром t.me/s/...).</i>"
@@ -589,7 +589,7 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
                 "ℹ️ <b>Использование команды:</b>\n"
                 "<code>/addchannel @username [Категория]</code>\n\n"
                 "<i>Примеры:</i>\n"
-                "• <code>/addchannel @neuralmeduza</code> (ИИ автоматически определит категорию!)\n"
+                "• <code>/addchannel @xakep_ru</code> (ИИ автоматически определит категорию!)\n"
                 "• <code>/addchannel @habr_com DevOps & Linux</code>\n"
                 "• <code>/addchannel https://t.me/ai_newz</code>"
             )

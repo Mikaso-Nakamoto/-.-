@@ -25,7 +25,7 @@ def clean_channel_username(raw: str) -> str:
     """
     Очищает введенную пользователем строку (ссылку или юзернейм) до чистого имени канала.
     Примеры:
-      @neuralmeduza -> neuralmeduza
+      @xakep_ru -> xakep_ru
       https://t.me/ai_newz -> ai_newz
       https://t.me/s/habr_com/ -> habr_com
       t.me/proglib -> proglib

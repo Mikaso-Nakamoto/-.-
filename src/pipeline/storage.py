@@ -91,6 +91,12 @@ class Storage:
             except sqlite3.OperationalError:
                 pass
 
+            # Очистка от сатирических/пародийных каналов
+            try:
+                conn.execute("DELETE FROM news_feed WHERE LOWER(channel) LIKE '%neuralmeduza%'")
+            except Exception:
+                pass
+
     def _hash_item(self, item: Dict[str, Any]) -> str:
         unique_key = item.get("guid") or item.get("url") or item.get("title", "")
         return hashlib.sha256(unique_key.encode("utf-8")).hexdigest()

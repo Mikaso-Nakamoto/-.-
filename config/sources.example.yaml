@@ -2,8 +2,6 @@
 sources:
   telegram_channels:
     # Технологии, ИИ и Инфобез (включая Хакер.ру)
-    - username: "neuralmeduza"
-      category: "Нейросети и ИИ"
     - username: "ai_newz"
       category: "Нейросети и ИИ"
     - username: "xakep_ru"
