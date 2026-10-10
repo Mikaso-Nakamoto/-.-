@@ -26,8 +26,12 @@ def get_main_menu_keyboard(chat_mode: bool = False, web_app_url: Optional[str] =
 
     rows = [first_row, second_row, third_row]
 
-    if web_app_url:
-        rows.append([InlineKeyboardButton(text="📱 Открыть окно внутри TG", web_app=WebAppInfo(url=web_app_url))])
+    if web_app_url and str(web_app_url).strip():
+        clean_url = str(web_app_url).strip()
+        if clean_url.lower().startswith("https://"):
+            rows.append([InlineKeyboardButton(text="📱 Открыть окно в TG", web_app=WebAppInfo(url=clean_url))])
+        elif clean_url.lower().startswith("http://"):
+            rows.append([InlineKeyboardButton(text="🌐 Веб-панель (LAN)", url=clean_url)])
 
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -53,8 +57,12 @@ def get_digest_feedback_keyboard(web_app_url: Optional[str] = None, md_file_id: 
     action_row = [
         InlineKeyboardButton(text="💬 Обсудить с ИИ", callback_data="btn_chat_start")
     ]
-    if web_app_url:
-        action_row.append(InlineKeyboardButton(text="📱 Открыть окно в TG", web_app=WebAppInfo(url=web_app_url)))
+    if web_app_url and str(web_app_url).strip():
+        clean_url = str(web_app_url).strip()
+        if clean_url.lower().startswith("https://"):
+            action_row.append(InlineKeyboardButton(text="📱 Открыть окно в TG", web_app=WebAppInfo(url=clean_url)))
+        elif clean_url.lower().startswith("http://"):
+            action_row.append(InlineKeyboardButton(text="🌐 Веб-панель", url=clean_url))
     rows.append(action_row)
 
     if md_file_id:

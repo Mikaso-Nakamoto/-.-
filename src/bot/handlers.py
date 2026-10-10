@@ -60,27 +60,51 @@ CATEGORIES_MAP = {
 def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: Storage, admin_id: int, scheduler=None) -> Router:
     r = Router()
 
+    # Проверка сохраненного admin_id в SQLite
+    saved_admin = storage.get_setting("admin_id")
+    configured_admin_id = int(saved_admin) if saved_admin and saved_admin.isdigit() else admin_id
+
+    # Если admin_id равен 123456789 (шаблонный плейсхолдер из примера) — считаем ненастроенным (0)
+    if configured_admin_id == 123456789:
+        configured_admin_id = 0
+
     def is_admin(user_id: int) -> bool:
-        return admin_id == 0 or user_id == admin_id
+        nonlocal configured_admin_id
+        # Авто-привязка первого написавшего пользователя как администратора
+        if configured_admin_id == 0:
+            configured_admin_id = user_id
+            storage.set_setting("admin_id", str(user_id))
+            logger.info(f"🔑 Администратор бота успешно авто-зарегистрирован: ID={user_id}")
+            return True
+        return user_id == configured_admin_id
 
     def get_web_app_url() -> str | None:
-        return os.getenv("WEB_APP_URL") or "http://192.168.0.169:8000"
+        url = os.getenv("WEB_APP_URL", "").strip()
+        return url or "http://192.168.0.169:8000"
 
     async def safe_edit_text(call: CallbackQuery, text: str, reply_markup=None):
         try:
-            html_text = markdown_to_telegram_html(text)
+            await call.answer()
+        except Exception:
+            pass
+
+        html_text = markdown_to_telegram_html(text)
+        try:
             await call.message.edit_text(html_text, parse_mode="HTML", reply_markup=reply_markup)
         except TelegramBadRequest as e:
             if "message is not modified" in str(e).lower():
-                pass
-            else:
-                logger.warning(f"Ошибка редактирования сообщения HTML: {e}, попытка без разметки...")
+                return
+            logger.warning(f"Ошибка редактирования сообщения HTML: {e}, попытка без разметки...")
+            try:
+                await call.message.edit_text(text, reply_markup=reply_markup)
+            except Exception as e2:
+                logger.error(f"Редактирование с кнопками не удалось ({e2}), пробуем без кнопок...")
                 try:
-                    await call.message.edit_text(text, reply_markup=reply_markup)
-                except Exception:
-                    pass
+                    await call.message.edit_text(text)
+                except Exception as e3:
+                    logger.error(f"Критическая ошибка edit_text: {e3}")
         except Exception as e:
-            logger.warning(f"Ошибка при edit_text: {e}")
+            logger.error(f"Необработанная ошибка при edit_text: {e}")
 
     async def send_safe_reply(msg: Message, text: str, reply_markup=None, link_preview_options: LinkPreviewOptions = None):
         html_text = markdown_to_telegram_html(text)
@@ -99,16 +123,26 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
                 )
         except TelegramBadRequest as e:
             logger.warning(f"Telegram HTML parse error ({e}), retrying as plain text...")
-            if len(text) > 4000:
-                for x in range(0, len(text), 4000):
-                    await msg.answer(text[x:x+4000])
-                if reply_markup:
-                    await msg.answer("💬 Управление:", reply_markup=reply_markup)
-            else:
-                await msg.answer(text, reply_markup=reply_markup)
+            try:
+                if len(text) > 4000:
+                    for x in range(0, len(text), 4000):
+                        await msg.answer(text[x:x+4000])
+                    if reply_markup:
+                        await msg.answer("💬 Управление:", reply_markup=reply_markup)
+                else:
+                    await msg.answer(text, reply_markup=reply_markup)
+            except Exception as e2:
+                logger.error(f"Send with reply_markup failed ({e2}), retrying plain message...")
+                try:
+                    await msg.answer(text)
+                except Exception as e3:
+                    logger.error(f"Fatal send_safe_reply error: {e3}")
         except Exception as e:
             logger.error(f"Failed to send message: {e}")
-            await msg.answer(f"⚠️ Ошибка отправки: {e}")
+            try:
+                await msg.answer(f"⚠️ Ошибка отправки: {e}")
+            except Exception:
+                pass
 
     # --------------------------------------------------------------------------
     # Главное меню (Команда /start или кнопка "Главное меню")
@@ -116,7 +150,15 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
     @r.message(Command("start"))
     async def cmd_start_msg(msg: Message, state: FSMContext):
         if not is_admin(msg.from_user.id):
-            await msg.answer("⛔️ Доступ ограничен.")
+            await msg.answer(
+                f"⛔️ <b>Доступ ограничен.</b>\n\n"
+                f"Ваш Telegram ID: <code>{msg.from_user.id}</code>\n"
+                f"ID администратора бота: <code>{configured_admin_id}</code>\n\n"
+                f"Если это ваш бот, укажите:\n"
+                f"<code>TELEGRAM_ADMIN_ID={msg.from_user.id}</code>\n"
+                f"в файле <code>.env</code> на сервере и перезапустите контейнер.",
+                parse_mode="HTML"
+            )
             return
 
         await state.clear()
