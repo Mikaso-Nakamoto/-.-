@@ -11,19 +11,21 @@
     body { background-color: #090d16; color: #f1f5f9; padding-bottom: 75px; overflow-x: hidden; }
 
     /* Верхняя панель */
-    header { position: sticky; top: 0; z-index: 100; background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(12px); border-bottom: 1px solid #1e293b; padding: 14px 18px; display: flex; justify-content: space-between; align-items: center; }
-    .logo { font-size: 1.15rem; font-weight: 700; background: linear-gradient(135deg, #38bdf8, #818cf8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-    .status-badge { font-size: 0.75rem; background: #1e293b; padding: 4px 10px; border-radius: 20px; border: 1px solid #334155; display: flex; align-items: center; gap: 6px; }
-    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #22c55e; }
+    header { position: sticky; top: 0; z-index: 100; background: rgba(15, 23, 42, 0.88); backdrop-filter: blur(12px); border-bottom: 1px solid #1e293b; padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; }
+    .logo { font-size: 1.1rem; font-weight: 700; background: linear-gradient(135deg, #38bdf8, #818cf8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .status-badge { font-size: 0.75rem; background: #1e293b; padding: 4px 10px; border-radius: 20px; border: 1px solid #334155; display: flex; align-items: center; gap: 6px; cursor: pointer; }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #94a3b8; }
+    .status-dot.online { background: #22c55e; box-shadow: 0 0 8px #22c55e; }
+    .status-dot.cloud { background: #38bdf8; }
+    .status-dot.offline { background: #ef4444; }
 
     /* Контейнеры вкладок */
-    .tab-content { display: none; padding: 14px; max-width: 600px; margin: 0 auto; }
+    .tab-content { display: none; padding: 14px; max-width: 650px; margin: 0 auto; }
     .tab-content.active { display: block; animation: fadeIn 0.2s ease-in-out; }
     @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 
     /* Карточки в стиле Google Discover */
-    .card { background: #131c2e; border: 1px solid #1e293b; border-radius: 16px; padding: 16px; margin-bottom: 14px; box-shadow: 0 4px 20px rgba(0,0,0,0.25); transition: transform 0.15s ease; }
-    .card:active { transform: scale(0.99); }
+    .card { background: #131c2e; border: 1px solid #1e293b; border-radius: 16px; padding: 16px; margin-bottom: 14px; box-shadow: 0 4px 20px rgba(0,0,0,0.25); }
     .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
     .category-pill { font-size: 0.7rem; font-weight: 600; padding: 3px 8px; border-radius: 6px; background: rgba(56, 189, 248, 0.15); color: #38bdf8; text-transform: uppercase; }
     .channel-name { font-size: 0.75rem; color: #94a3b8; }
@@ -32,19 +34,25 @@
     .card-footer { display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #1e293b; padding-top: 10px; }
     .card-link { font-size: 0.8rem; color: #818cf8; text-decoration: none; font-weight: 500; }
     .card-actions { display: flex; gap: 8px; }
-    .btn-action { background: #1e293b; border: 1px solid #334155; color: #f1f5f9; padding: 5px 10px; border-radius: 8px; cursor: pointer; font-size: 0.8rem; }
+    .btn-action { background: #1e293b; border: 1px solid #334155; color: #f1f5f9; padding: 5px 10px; border-radius: 8px; cursor: pointer; font-size: 0.85rem; }
     .btn-action:hover { background: #334155; }
 
     /* Вкладка Чата */
-    .chat-container { display: flex; flex-direction: column; height: calc(100vh - 150px); }
+    .chat-container { display: flex; flex-direction: column; height: calc(100vh - 145px); }
+    .chat-header-bar { display: flex; justify-content: space-between; align-items: center; padding-bottom: 8px; margin-bottom: 8px; border-bottom: 1px solid #1e293b; font-size: 0.8rem; }
+    .model-selector { background: #1e293b; color: #f1f5f9; border: 1px solid #334155; border-radius: 8px; padding: 4px 8px; font-size: 0.75rem; outline: none; }
     .chat-messages { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding-bottom: 10px; }
-    .bubble { max-width: 82%; padding: 12px 16px; border-radius: 18px; font-size: 0.92rem; line-height: 1.45; word-wrap: break-word; }
-    .bubble.user { align-self: flex-end; background: #3b82f6; color: #ffffff; border-bottom-right-radius: 4px; }
+    .bubble { max-width: 85%; padding: 12px 16px; border-radius: 18px; font-size: 0.92rem; line-height: 1.45; word-wrap: break-word; white-space: pre-wrap; }
+    .bubble.user { align-self: flex-end; background: #2563eb; color: #ffffff; border-bottom-right-radius: 4px; }
     .bubble.bot { align-self: flex-start; background: #1e293b; color: #f1f5f9; border-bottom-left-radius: 4px; border: 1px solid #334155; }
-    .bubble-meta { font-size: 0.7rem; color: #94a3b8; margin-top: 4px; text-align: right; }
+    .bubble.error { background: #451a1a; border-color: #ef4444; color: #fca5a5; }
+    .bubble.typing { font-style: italic; color: #94a3b8; }
+    .bubble-meta { font-size: 0.7rem; color: #94a3b8; margin-top: 6px; text-align: right; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 4px; }
     .chat-input-bar { display: flex; gap: 8px; padding-top: 10px; border-top: 1px solid #1e293b; }
     .chat-input { flex: 1; background: #131c2e; border: 1px solid #334155; border-radius: 24px; padding: 12px 18px; color: #fff; font-size: 0.95rem; outline: none; }
-    .chat-send { background: #3b82f6; border: none; border-radius: 50%; width: 45px; height: 45px; color: #fff; font-weight: bold; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+    .chat-input:focus { border-color: #38bdf8; }
+    .chat-send { background: #2563eb; border: none; border-radius: 50%; width: 45px; height: 45px; color: #fff; font-weight: bold; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+    .chat-send:active { transform: scale(0.95); }
 
     /* Нижняя навигация */
     nav { position: fixed; bottom: 0; left: 0; right: 0; height: 60px; background: rgba(15, 23, 42, 0.95); backdrop-filter: blur(14px); border-top: 1px solid #1e293b; display: flex; justify-content: space-around; align-items: center; z-index: 100; }
@@ -57,7 +65,7 @@
 
   <header>
     <div class="logo">⚡️ AI News Discover</div>
-    <div class="status-badge" id="statusBadge">
+    <div class="status-badge" id="statusBadge" onclick="loadStatus()">
       <div class="status-dot" id="statusDot"></div>
       <span id="statusText">Подключение...</span>
     </div>
@@ -73,9 +81,19 @@
   <!-- ВКЛАДКА 2: ИИ ЧАТ -->
   <main class="tab-content" id="tabChat">
     <div class="chat-container">
+      <div class="chat-header-bar">
+        <span>Активная нейросеть:</span>
+        <select class="model-selector" id="modelSelect">
+          <option value="auto">🔄 Auto (Локальный ➔ Резерв)</option>
+          <option value="local">🖥 Локальный ПК (LM Studio / Qwen 2.5)</option>
+          <option value="gemini">🌐 Google Gemini 3.5 Flash</option>
+          <option value="groq">⚡️ Groq Llama 3.3 70B</option>
+          <option value="openrouter">🔀 OpenRouter Free</option>
+        </select>
+      </div>
       <div class="chat-messages" id="chatMessages">
         <div class="bubble bot">
-          👋 Привет! Я твой ИИ-ассистент. Я знаю свежие новости за сегодня и готов ответить на любые вопросы!
+          👋 Привет! Я твой персональный ИИ-ассистент. Я знаю свежие новости за сегодня и готов ответить на любые вопросы!
         </div>
       </div>
       <div class="chat-input-bar">
@@ -90,8 +108,9 @@
     <div class="card">
       <div class="card-header">
         <span class="category-pill">08:50 ДАЙДЖЕСТ</span>
+        <button class="btn-action" onclick="refreshDigestNow()">⚡️ Запустить сбор</button>
       </div>
-      <div id="digestBody" style="line-height:1.6; font-size:0.95rem; white-space: pre-wrap;">
+      <div id="digestBody" style="line-height:1.6; font-size:0.95rem; white-space: pre-wrap; margin-top:10px;">
         Загрузка последнего дайджеста...
       </div>
     </div>
@@ -121,6 +140,7 @@
       el.classList.add('active');
 
       if (tabId === 'tabDigest') loadDigest();
+      if (tabId === 'tabFeed') loadFeed();
     }
 
     async function loadStatus() {
@@ -129,15 +149,19 @@
         const d = await r.json();
         const dot = document.getElementById('statusDot');
         const txt = document.getElementById('statusText');
+        dot.className = 'status-dot';
+
         if (d.local_pc_online) {
-          dot.style.background = '#22c55e';
+          dot.classList.add('online');
           txt.innerText = 'ПК (Qwen 2.5)';
         } else {
-          dot.style.background = '#38bdf8';
+          dot.classList.add('cloud');
           txt.innerText = d.active_provider.toUpperCase();
         }
       } catch (e) {
-        document.getElementById('statusText').innerText = 'Офлайн';
+        const dot = document.getElementById('statusDot');
+        dot.className = 'status-dot offline';
+        document.getElementById('statusText').innerText = 'Сервер офлайн';
       }
     }
 
@@ -147,7 +171,12 @@
         const data = await r.json();
         const container = document.getElementById('feedList');
         if (!data.items || data.items.length === 0) {
-          container.innerHTML = '<p style="text-align:center; color:#64748b; margin-top:40px;">Пока нет новостей. Нажмите сбор в боте!</p>';
+          container.innerHTML = `
+            <div style="text-align:center; padding: 40px 10px;">
+              <p style="color:#94a3b8; margin-bottom:14px;">📭 Лента пуста. Новости еще не собраны.</p>
+              <button class="btn-action" style="padding:8px 16px;" onclick="refreshDigestNow()">⚡️ Запустить сбор новостей</button>
+            </div>
+          `;
           return;
         }
         container.innerHTML = data.items.map(item => `
@@ -161,8 +190,8 @@
             <div class="card-footer">
               <a href="${item.url}" target="_blank" class="card-link">Открыть оригинал →</a>
               <div class="card-actions">
-                <button class="btn-action" onclick="sendFeedback('like', '${item.title}')">👍</button>
-                <button class="btn-action" onclick="sendFeedback('dislike', '${item.title}')">👎</button>
+                <button class="btn-action" onclick="sendFeedback('like', '${encodeURIComponent(item.title)}')">👍</button>
+                <button class="btn-action" onclick="sendFeedback('dislike', '${encodeURIComponent(item.title)}')">👎</button>
               </div>
             </div>
           </div>
@@ -182,13 +211,31 @@
       }
     }
 
-    async function sendFeedback(reaction, title) {
-      await fetch('/api/feedback', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reaction, context: title })
-      });
-      alert(reaction === 'like' ? '👍 Сохранено в предпочтения' : '👎 Учтено!');
+    async function refreshDigestNow() {
+      const body = document.getElementById('digestBody');
+      body.innerText = '⏳ Идет сбор новостей и генерация сводки через ИИ...';
+      try {
+        const r = await fetch('/api/digest/refresh', { method: 'POST' });
+        const d = await r.json();
+        body.innerText = d.text;
+        loadFeed();
+      } catch (e) {
+        body.innerText = '⚠️ Ошибка запуска сбора.';
+      }
+    }
+
+    async function sendFeedback(reaction, encodedTitle) {
+      const title = decodeURIComponent(encodedTitle);
+      try {
+        await fetch('/api/feedback', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reaction, context: title })
+        });
+        alert(reaction === 'like' ? '👍 Сохранено в предпочтения' : '👎 Учтено!');
+      } catch (e) {
+        alert('Ошибка отправки реакции');
+      }
     }
 
     async function sendMessage() {
@@ -197,30 +244,65 @@
       if (!text) return;
 
       const msgs = document.getElementById('chatMessages');
-      msgs.innerHTML += `<div class="bubble user">${text}</div>`;
+      msgs.innerHTML += `<div class="bubble user">${escapeHtml(text)}</div>`;
       input.value = '';
+
+      // Создаем временный пузырь с анимацией ожидания
+      const loadingBubble = document.createElement('div');
+      loadingBubble.className = 'bubble bot typing';
+      loadingBubble.innerText = '⏳ Нейросеть генерирует ответ...';
+      msgs.appendChild(loadingBubble);
       msgs.scrollTop = msgs.scrollHeight;
 
+      const selectedProvider = document.getElementById('modelSelect').value;
+
       try {
+        const payload = { message: text };
+        if (selectedProvider !== 'auto') {
+          payload.provider = selectedProvider;
+        }
+
         const r = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: text })
+          body: JSON.stringify(payload)
         });
-        const res = await r.json();
-        const content = res.content || 'Ошибка ответа';
-        const meta = `${res.provider.toUpperCase()} (${res.model}) • ${res.latency}с`;
 
-        msgs.innerHTML += `
-          <div class="bubble bot">
-            ${content}
-            <div class="bubble-meta">🤖 ${meta}</div>
-          </div>
-        `;
+        if (!r.ok) {
+          throw new Error(`HTTP ${r.status}`);
+        }
+
+        const res = await r.json();
+        loadingBubble.classList.remove('typing');
+
+        if (!res.success) {
+          loadingBubble.classList.add('error');
+          loadingBubble.innerText = `⚠️ ${res.content || 'Не удалось получить ответ от LLM'}`;
+          return;
+        }
+
+        const prov = (res.provider || 'AI').toUpperCase();
+        const model = res.model || '';
+        const latency = res.latency ? ` • ${res.latency}с` : '';
+
+        loadingBubble.innerText = res.content || '';
+        const metaDiv = document.createElement('div');
+        metaDiv.className = 'bubble-meta';
+        metaDiv.innerText = `🤖 ${prov} (${model})${latency}`;
+        loadingBubble.appendChild(metaDiv);
         msgs.scrollTop = msgs.scrollHeight;
+
       } catch (e) {
-        msgs.innerHTML += `<div class="bubble bot">⚠️ Ошибка соединения с сервером.</div>`;
+        loadingBubble.classList.remove('typing');
+        loadingBubble.classList.add('error');
+        loadingBubble.innerText = `⚠️ Ошибка: ${e.message}. Убедитесь, что сервер запущен или проверьте ключи в .env.`;
       }
+    }
+
+    function escapeHtml(string) {
+      const div = document.createElement('div');
+      div.innerText = string;
+      return div.innerHTML;
     }
 
     document.getElementById('chatSend').onclick = sendMessage;
