@@ -49,7 +49,7 @@ class TelegramWebCollector:
             "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7"
         }
 
-    async def fetch_channel(self, client: httpx.AsyncClient, channel_info: Dict[str, str], limit: int = 10) -> List[Dict[str, Any]]:
+    async def fetch_channel(self, client: httpx.AsyncClient, channel_info: Dict[str, str], limit: int = 15) -> List[Dict[str, Any]]:
         raw_user = channel_info.get("username", "").strip()
         username = resolve_channel_username(raw_user)
         category = channel_info.get("category", "Общее")
@@ -131,11 +131,11 @@ class TelegramWebCollector:
                 yt_match = re.search(r'(https?://(?:www\.)?(?:youtube\.com/watch\?v=|youtu\.be/|youtube\.com/shorts/)[a-zA-Z0-9_-]+)', text)
                 youtube_url = yt_match.group(1) if yt_match else ""
 
-                # 2. Извлечение прикрепленного изображения или обложки видео
-                image_url = ""
+                # 2. Извлечение прикрепленных изображений или обложек видео
+                media_urls = []
                 video_url = ""
 
-                # А. Поиск background-image: url(...) среди всех элементов блока (фото, видео-превью, превью ссылок)
+                # А. Поиск background-image: url(...) среди всех элементов блока (фото, медиа-сетка, видео-превью)
                 for elem in msg_div.find_all(style=True):
                     st = elem.get("style", "")
                     if "url(" in st:
@@ -145,25 +145,26 @@ class TelegramWebCollector:
                             classes = elem.get("class", [])
                             cls_str = " ".join(classes) if isinstance(classes, list) else str(classes)
                             if "user_photo" not in cls_str and "avatar" not in cls_str:
-                                image_url = cand
-                                break
+                                if cand not in media_urls:
+                                    media_urls.append(cand)
 
                 # Б. Поиск тегов <img>
-                if not image_url:
-                    for img in msg_div.find_all("img"):
-                        src = img.get("src", "")
-                        classes = img.get("class", [])
-                        cls_str = " ".join(classes) if isinstance(classes, list) else str(classes)
-                        if src.startswith("http") and "user_photo" not in cls_str and "avatar" not in cls_str:
-                            image_url = src
-                            break
+                for img in msg_div.find_all("img"):
+                    src = img.get("src", "")
+                    classes = img.get("class", [])
+                    cls_str = " ".join(classes) if isinstance(classes, list) else str(classes)
+                    if src.startswith("http") and "user_photo" not in cls_str and "avatar" not in cls_str:
+                        if src not in media_urls:
+                            media_urls.append(src)
 
                 # В. Поиск тегов <video>
                 for vid in msg_div.find_all("video"):
-                    if not image_url and vid.get("poster"):
-                        image_url = vid["poster"]
-                    if vid.get("src"):
+                    if vid.get("poster") and vid["poster"] not in media_urls:
+                        media_urls.append(vid["poster"])
+                    if vid.get("src") and not video_url:
                         video_url = vid["src"]
+
+                image_url = media_urls[0] if media_urls else ""
 
                 items.append({
                     "source_type": "telegram",
@@ -173,6 +174,7 @@ class TelegramWebCollector:
                     "content": text,
                     "url": post_link,
                     "image_url": image_url,
+                    "media_urls": media_urls,
                     "video_url": video_url,
                     "youtube_url": youtube_url,
                     "published_at": published_at,
@@ -184,7 +186,7 @@ class TelegramWebCollector:
 
         return items
 
-    async def fetch_all(self, limit_per_channel: int = 8) -> List[Dict[str, Any]]:
+    async def fetch_all(self, limit_per_channel: int = 15) -> List[Dict[str, Any]]:
         results = []
         async with httpx.AsyncClient(follow_redirects=True) as client:
             for channel in self.channels:

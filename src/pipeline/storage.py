@@ -1,5 +1,7 @@
 import sqlite3
 import hashlib
+import json
+import re
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from datetime import datetime
@@ -27,6 +29,11 @@ class Storage:
         self.set_setting("test_mode_no_save", "1" if enabled else "0")
 
     def _get_connection(self) -> sqlite3.Connection:
+        if str(self.path) == ":memory:":
+            if not hasattr(self, "_mem_conn") or self._mem_conn is None:
+                self._mem_conn = sqlite3.connect(":memory:")
+                self._mem_conn.row_factory = sqlite3.Row
+            return self._mem_conn
         conn = sqlite3.connect(self.path)
         conn.execute("PRAGMA journal_mode=WAL;")
         conn.row_factory = sqlite3.Row
@@ -104,6 +111,10 @@ class Storage:
                 conn.execute("ALTER TABLE news_feed ADD COLUMN image_url TEXT")
             except sqlite3.OperationalError:
                 pass
+            try:
+                conn.execute("ALTER TABLE news_feed ADD COLUMN media_json TEXT")
+            except sqlite3.OperationalError:
+                pass
 
             # Очистка от сатирических/пародийных каналов
             try:
@@ -147,16 +158,14 @@ class Storage:
 
     def save_news_items(self, items: List[Dict[str, Any]]):
         with self._get_connection() as conn:
-            # В тестовом режиме заменяем старые новости свежими, чтобы не копить старый мусор
-            if self.is_test_mode():
-                conn.execute("DELETE FROM news_feed")
-
             for it in items:
                 h = it.get("item_hash") or self._hash_item(it)
+                media_list = it.get("media_urls") or ([it.get("image_url")] if it.get("image_url") else [])
+                media_json_str = json.dumps(media_list, ensure_ascii=False) if media_list else ""
                 conn.execute("""
-                    INSERT OR IGNORE INTO news_feed 
-                    (item_hash, source_type, channel, category, title, content, url, image_url, published_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT OR REPLACE INTO news_feed 
+                    (item_hash, source_type, channel, category, title, content, url, image_url, media_json, published_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     h,
                     it.get("source_type", "unknown"),
@@ -166,8 +175,11 @@ class Storage:
                     it.get("content", ""),
                     it.get("url", ""),
                     it.get("image_url", ""),
+                    media_json_str,
                     it.get("published_at", "")
                 ))
+            # Ограничиваем буфер новостей последними 300 записями
+            conn.execute("DELETE FROM news_feed WHERE id NOT IN (SELECT id FROM news_feed ORDER BY id DESC LIMIT 300)")
 
     def purge_all_news_and_digests(self):
         """Полная зачистка старых новостей, хэшей и архивов дайджестов для чистого старта"""
@@ -193,14 +205,65 @@ class Storage:
                 (h, "youtube_ross", "@ross_name", video_url)
             )
 
-    def get_news_feed(self, limit: int = 40) -> List[Dict[str, Any]]:
+    def get_news_feed(self, limit: int = 60) -> List[Dict[str, Any]]:
         with self._get_connection() as conn:
             cur = conn.execute(
-                "SELECT id, channel, category, title, content, url, image_url, published_at, created_at FROM news_feed ORDER BY id DESC LIMIT ?",
+                "SELECT id, item_hash, source_type, channel, category, title, content, url, image_url, media_json, published_at, created_at FROM news_feed ORDER BY id DESC LIMIT ?",
                 (limit,)
             )
             rows = cur.fetchall()
-            return [dict(row) for row in rows]
+            items = []
+            for row in rows:
+                d = dict(row)
+                m_json = d.get("media_json")
+                if m_json:
+                    try:
+                        d["media_urls"] = json.loads(m_json)
+                    except Exception:
+                        d["media_urls"] = [d["image_url"]] if d.get("image_url") else []
+                else:
+                    d["media_urls"] = [d["image_url"]] if d.get("image_url") else []
+                items.append(d)
+            return items
+
+    def search_news_feed(self, query: str, limit: int = 40) -> List[Dict[str, Any]]:
+        """
+        Ищет публикации в базе данных по корням слов и ключевым терминам
+        """
+        words = re.findall(r'[а-яa-z0-9]+', query.lower())
+        stems = []
+        stop_words = {"что", "как", "где", "когда", "почему", "это", "или", "для", "про", "был", "была", "были", "быть", "все", "всё", "его", "она", "они", "том", "под", "при", "над"}
+        for w in words:
+            if len(w) <= 2 or w in stop_words:
+                continue
+            if w.startswith("ростов"):
+                stems.append("ростов")
+                continue
+            stem = re.sub(r'(?:овали|евали|ован|еван|али|яли|или|ила|ала|ели|ать|ять|ить|еть|ого|его|ому|ему|ыми|ими|ами|ями|ах|ях|ия|ие|ые|ое|ее|ом|ем|ой|ей|ам|ям|а|я|о|е|у|ю|ы|и)$', '', w)
+            stems.append(stem if len(stem) >= 3 else w)
+
+        all_items = self.get_news_feed(limit=250)
+        if not stems:
+            return all_items[:limit]
+
+        scored = []
+        for it in all_items:
+            corpus = f"{it.get('channel', '')} {it.get('title', '')} {it.get('content', '')} {it.get('category', '')}".lower()
+            score = 0
+            for s in stems:
+                if s in corpus:
+                    score += 25
+            if any(s in corpus for s in ["атак", "удар", "дрон", "бпла", "взрыв", "прилет", "пожар", "нефт", "мост"]):
+                score += 15
+            if any(ch in str(it.get("channel", "")).lower() for ch in ["ross_name", "dyadyabatya", "rybar", "tsargrad"]):
+                score += 10
+            if it.get("image_url") or it.get("media_urls"):
+                score += 5
+            if score > 0:
+                scored.append((score, it))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return [it for _, it in scored[:limit]]
 
     def save_digest(self, digest_text: str, provider: str, count: int):
         if self.is_test_mode():

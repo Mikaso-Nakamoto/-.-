@@ -8,7 +8,7 @@ from src.pipeline.storage import Storage
 from src.llm.router import LLMRouter
 from src.pipeline.digest_builder import DigestBuilder
 from src.scheduler.cron_scheduler import DigestScheduler
-from src.bot.handlers import setup_router
+from src.bot.handlers import setup_router, register_bot_commands
 from src.api.server import create_app
 
 logging.basicConfig(
@@ -48,6 +48,9 @@ async def main():
     # Инициализация Telegram бота
     bot = Bot(token=cfg.bot.token)
     dp = Dispatcher()
+
+    # Регистрация нативных команд Telegram в меню [/]
+    await register_bot_commands(bot)
 
     # Инициализация планировщика (08:50)
     scheduler = DigestScheduler(cfg.scheduler, digest_builder, bot, cfg.bot.admin_id)

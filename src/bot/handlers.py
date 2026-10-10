@@ -3,6 +3,7 @@ import os
 import re
 import html
 import httpx
+from typing import List, Dict, Any, Optional
 from pathlib import Path
 from datetime import datetime
 from aiogram import Router, F
@@ -16,9 +17,48 @@ from aiogram.types import (
     FSInputFile,
     LinkPreviewOptions,
     InputMediaPhoto,
-    BufferedInputFile
+    BufferedInputFile,
+    BotCommand,
+    BotCommandScopeDefault
 )
 from aiogram.exceptions import TelegramBadRequest
+
+BOT_COMMANDS = [
+    BotCommand(command="start", description="🏠 Главное меню и статус"),
+    BotCommand(command="chat", description="💬 Войти в диалог с ИИ"),
+    BotCommand(command="exit", description="🚪 Выйти из диалога в меню"),
+    BotCommand(command="digest", description="⚡️ Сформировать утренний дайджест"),
+    BotCommand(command="status", description="📊 Статус узлов и моделей"),
+    BotCommand(command="sources", description="📋 Управление каналами и RSS"),
+    BotCommand(command="add_channel", description="➕ Добавить Telegram-канал"),
+    BotCommand(command="add_rss", description="➕ Добавить RSS-ленту"),
+    BotCommand(command="del_source", description="🗑 Удалить источник"),
+    BotCommand(command="refresh", description="🔄 Собрать свежие новости сейчас"),
+    BotCommand(command="test_mode", description="🧪 Переключить тестовый режим"),
+    BotCommand(command="help", description="ℹ️ Инструкция и справка по командам"),
+]
+
+async def register_bot_commands(bot):
+    try:
+        await bot.set_my_commands(BOT_COMMANDS, scope=BotCommandScopeDefault())
+        logger.info("Команды бота в меню успешно зарегистрированы.")
+    except Exception as e:
+        logger.warning(f"Ошибка регистрации команд в меню Telegram: {e}")
+
+def extract_stems(text: str) -> List[str]:
+    """Извлекает корни слов для семантического поиска по новостям"""
+    words = re.findall(r'[а-яa-z0-9]+', text.lower())
+    stems = []
+    stop_words = {"что", "как", "где", "когда", "почему", "это", "или", "для", "про", "был", "была", "были", "быть", "все", "всё", "его", "она", "они", "том", "под", "при", "над", "после", "этой"}
+    for w in words:
+        if len(w) <= 2 or w in stop_words:
+            continue
+        if w.startswith("ростов"):
+            stems.append("ростов")
+            continue
+        stem = re.sub(r'(?:овали|евали|ован|еван|али|яли|или|ила|ала|ели|ать|ять|ить|еть|ого|его|ому|ему|ыми|ими|ами|ями|ах|ях|ия|ие|ые|ое|ее|ом|ем|ой|ей|ам|ям|а|я|о|е|у|ю|ы|и)$', '', w)
+        stems.append(stem if len(stem) >= 3 else w)
+    return list(dict.fromkeys(stems))
 
 async def download_image_as_input_file(url: str, timeout: float = 8.0) -> BufferedInputFile | None:
     if not url or not url.startswith("http"):
@@ -191,8 +231,8 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
     # --------------------------------------------------------------------------
     # Главное меню (Команда /start или кнопка "Главное меню", а также слова "старт", "меню")
     # --------------------------------------------------------------------------
-    @r.message(Command("start", "menu", "help"))
-    @r.message(F.text.lower().in_(["старт", "start", "меню", "menu", "привет", "главное меню", "/start", "/menu", "/help"]))
+    @r.message(Command("start", "menu"))
+    @r.message(F.text.lower().in_(["старт", "start", "меню", "menu", "привет", "главное меню", "/start", "/menu"]))
     async def cmd_start_msg(msg: Message, state: FSMContext):
         logger.info(f"📩 Команда СТАРТ/МЕНЮ от пользователя ID={msg.from_user.id} (@{msg.from_user.username})")
         if not is_admin(msg.from_user.id):
@@ -207,6 +247,7 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
             )
             return
 
+        await register_bot_commands(msg.bot)
         await state.clear()
         is_local_on = await llm_router.check_local_health()
         local_status = "🟢 В сети (LM Studio)" if is_local_on else "🔴 Офлайн (Включен облачный резерв)"
@@ -226,9 +267,35 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
             f"⏰ *Расписание:* `08:50 ({tz_name})`\n"
             f"⏳ *Следующая сводка:* `{next_run}`\n"
             f"💬 *Режим чата:* {'🟢 ВКЛЮЧЕН' if chat_active else '⚪️ Выключен'}\n\n"
-            f"Используйте кнопки ниже для управления:"
+            f"Используйте кнопки ниже или меню команд ( [/] ) для управления:"
         )
         await send_safe_reply(msg, text, reply_markup=get_main_menu_keyboard(chat_active, get_web_app_url()))
+
+    @r.message(Command("help"))
+    @r.message(F.text.lower().in_(["/help", "помощь", "справка", "инструкция"]))
+    async def cmd_help_msg(msg: Message):
+        if not is_admin(msg.from_user.id):
+            return
+        await register_bot_commands(msg.bot)
+        help_text = (
+            "📖 <b>Справочник команд и возможностей бота:</b>\n\n"
+            "💬 <b>Диалог и аналитика:</b>\n"
+            "• <code>/chat</code> — войти в режим прямого диалога с ИИ-аналитиком.\n"
+            "• <code>/exit</code> (или кнопка «Завершить диалог») — выйти из диалога в главное меню.\n"
+            "• В режиме чата бот собирает данные из всех каналов (@ross_name, @Dyadyabatya0, @rybar, РИА, ТАСС), объединяет факты в единый связанный абзац без дублей, выделяет ключевые фразы в <b>цитаты</b> и присылает <b>настоящие фотографии/видео</b> с места событий!\n\n"
+            "⚡️ <b>Сводки и новости:</b>\n"
+            "• <code>/digest</code> — немедленно сгенерировать глубокий аналитический дайджест со сравнительной таблицей и детальным разбором.\n"
+            "• <code>/refresh</code> — запустить оперативный сбор последних публикаций со всех каналов и лент.\n\n"
+            "⚙️ <b>Управление источниками и системой:</b>\n"
+            "• <code>/sources</code> — список подключенных каналов и RSS.\n"
+            "• <code>/add_channel</code> — добавить Telegram-канал (поддерживаются @юзернейм, ссылки t.me, telega.in и инвайт-ссылки t.me/+...).\n"
+            "• <code>/add_rss</code> — добавить RSS-ленту новостей.\n"
+            "• <code>/del_source</code> — удалить ненужный канал или ленту.\n"
+            "• <code>/status</code> — посмотреть статус локального ПК (LM Studio) и активной модели.\n"
+            "• <code>/test_mode</code> — переключить тестовый режим (вкл/выкл сохранение в БД).\n\n"
+            "<i>💡 Для вызова списка команд в любой момент нажимайте кнопку <b>«Меню» ( [/] )</b> в левом нижнем углу чата.</i>"
+        )
+        await send_safe_reply(msg, help_text, reply_markup=get_main_menu_keyboard(storage.is_chat_mode_active(), get_web_app_url()))
 
     @r.callback_query(F.data == "btn_menu")
     async def cb_main_menu(call: CallbackQuery, state: FSMContext):
@@ -1020,49 +1087,77 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
         q_lower = user_query.lower()
         is_news_inquiry = any(w in q_lower for w in [
             "новост", "украин", "сво", "фронт", "трамп", "войн", "политик",
-            "росс", "дядя батя", "рыбар", "ростов", "царьград", "конкретик", "что произошл", "ситуаци"
+            "росс", "дядя батя", "рыбар", "ростов", "царьград", "конкретик", "что произошл", "ситуаци",
+            "атак", "удар", "дрон", "бпла", "взрыв", "прилет", "пожар", "нефт", "мост", "софт"
         ])
 
-        recent_items = storage.get_news_feed(limit=50)
-        # Если в базе новостей мало или пользователь спрашивает о ситуации/новостях — оперативно собираем свежие посты!
-        if len(recent_items) < 8 or is_news_inquiry:
+        # 1. Поиск публикаций по корням слов и семантике в локальной базе
+        found_items = storage.search_news_feed(user_query, limit=40)
+
+        # 2. Если результатов мало или вопрос явно о событиях/сводках — оперативно опрашиваем каналы
+        if len(found_items) < 6 or is_news_inquiry:
             try:
-                fresh = await digest_builder.collect_fresh_news()
-                if fresh:
-                    recent_items = storage.get_news_feed(limit=50) or fresh
+                await digest_builder.collect_fresh_news()
+                found_items = storage.search_news_feed(user_query, limit=40)
             except Exception as e:
                 logger.warning(f"Оперативный сбор новостей для чата: {e}")
 
-        # Ранжируем публикации по релевантности запросу пользователя
+        # Объединяем с общей свежей лентой для полноты картины
+        general_feed = storage.get_news_feed(limit=50)
+        seen_hashes = {it.get("item_hash") or it.get("url") for it in found_items}
+        candidate_items = list(found_items)
+        for it in general_feed:
+            h = it.get("item_hash") or it.get("url")
+            if h not in seen_hashes:
+                candidate_items.append(it)
+                seen_hashes.add(h)
+
+        # 3. Детальное ранжирование релевантности публикации запросу
+        q_stems = extract_stems(user_query)
+
         def item_score(it):
             score = 0
-            text_corpus = (
-                str(it.get("channel", "")) + " " +
-                str(it.get("title", "")) + " " +
-                str(it.get("content", "")) + " " +
-                str(it.get("category", ""))
-            ).lower()
+            text_corpus = f"{it.get('channel', '')} {it.get('title', '')} {it.get('content', '')} {it.get('category', '')}".lower()
 
-            if any(w in q_lower for w in ["украин", "сво", "фронт", "войн", "политик", "трамп", "ситуаци"]):
-                if any(k in text_corpus for k in ["украин", "сво", "фронт", "трамп", "киев", "войн", "зеленск", "путин", "переговор"]):
-                    score += 15
-                if any(ch in str(it.get("channel", "")).lower() for ch in ["dyadyabatya", "ross_name", "rybar", "rian", "tass", "tsargrad", "kommersant"]):
-                    score += 10
+            # Совпадение по корням слов запроса
+            for s in q_stems:
+                if s in text_corpus:
+                    score += 30
 
-            if any(w in q_lower for w in ["софт", "программ", "утилит", "аналог", "photocraft", "wordcraft", "бесплатн", "замен", "инструмент", "github", "релиз"]):
-                if any(k in text_corpus for k in ["софт", "утилит", "github", "релиз", "photocraft", "wordcraft", "аналог", "бесплатно", "замена", "инструмент"]):
-                    score += 15
-                if any(ch in str(it.get("channel", "")).lower() for ch in ["it_shelter", "github_radar", "proglib", "dev_bubble", "xakep", "opennet"]):
-                    score += 10
+            # Особый приоритет для событий типа атаки на Ростов / СВО / фронт
+            if "ростов" in q_lower and "ростов" in text_corpus:
+                score += 50
+            if any(w in q_lower for w in ["атак", "удар", "дрон", "взрыв", "прилет", "сво", "фронт"]):
+                if any(k in text_corpus for k in ["атак", "удар", "дрон", "бпла", "нефт", "мост", "пожар", "взрыв", "сводк", "фронт"]):
+                    score += 40
 
-            for word in q_lower.split():
-                if len(word) > 3 and word in text_corpus:
-                    score += 5
+            # Приоритет авторитетных аналитических каналов
+            ch_lower = str(it.get("channel", "")).lower()
+            if any(ch in ch_lower for ch in ["ross_name", "dyadyabatya"]):
+                score += 25
+            elif any(ch in ch_lower for ch in ["rybar", "tsargrad", "rian", "tass"]):
+                score += 15
+
+            # Наличие медиа/фотографий
+            if it.get("media_urls") or it.get("image_url"):
+                score += 10
 
             return score
 
-        sorted_items = sorted(recent_items, key=item_score, reverse=True)
+        sorted_items = sorted(candidate_items, key=item_score, reverse=True)
 
+        # 4. Извлечение реальных фотографий из наиболее релевантных постов
+        relevant_photos = []
+        top_candidates = [it for it in sorted_items if item_score(it) >= 30] or sorted_items[:3]
+        for it in top_candidates[:4]:
+            for img in it.get("media_urls", []):
+                if img and img.startswith("http") and img not in relevant_photos:
+                    relevant_photos.append(img)
+            img0 = it.get("image_url")
+            if img0 and img0.startswith("http") and img0 not in relevant_photos:
+                relevant_photos.append(img0)
+
+        # 5. Формирование пакета фактов для LLM
         recent_news_str = ""
         if sorted_items:
             news_parts = []
@@ -1070,9 +1165,10 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
                 ch = it.get("channel", "Канал")
                 cat = it.get("category", "Новости")
                 t = it.get("title", "")
-                c = it.get("content", "")[:700]
+                c = it.get("content", "")[:750]
                 u = it.get("url", "")
-                news_parts.append(f"[{i}] Источник: {ch} ({cat})\nЗаголовок: {t}\nТекст публикации: {c}\nСсылка: {u}")
+                has_media = "Да" if it.get("image_url") or it.get("media_urls") else "Нет"
+                news_parts.append(f"[{i}] Источник: {ch} ({cat}) | Фото: {has_media}\nЗаголовок: {t}\nТекст публикации: {c}\nСсылка: {u}")
             recent_news_str = "\n---\n".join(news_parts)
 
         try:
@@ -1098,7 +1194,36 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
             if res.get("fallback_occurred"):
                 footer += " _(failover)_"
 
-            await send_safe_reply(msg, answer_text + footer, reply_markup=get_chat_control_keyboard())
+            # 6. Отправка ответа пользователю с настоящими фотографиями (если есть)
+            photos_to_send = relevant_photos[:4]
+            sent_with_media = False
+
+            if photos_to_send:
+                try:
+                    downloaded_media = await download_images_as_media_group(photos_to_send, max_count=4)
+                    if len(downloaded_media) == 1:
+                        caption_html = markdown_to_telegram_html(answer_text + footer)
+                        if len(caption_html) <= 1024:
+                            await msg.answer_photo(
+                                photo=downloaded_media[0].media,
+                                caption=caption_html,
+                                parse_mode="HTML",
+                                reply_markup=get_chat_control_keyboard()
+                            )
+                            sent_with_media = True
+                        else:
+                            await msg.answer_photo(photo=downloaded_media[0].media)
+                            await send_safe_reply(msg, answer_text + footer, reply_markup=get_chat_control_keyboard())
+                            sent_with_media = True
+                    elif len(downloaded_media) > 1:
+                        await msg.answer_media_group(media=downloaded_media)
+                        await send_safe_reply(msg, answer_text + footer, reply_markup=get_chat_control_keyboard())
+                        sent_with_media = True
+                except Exception as media_err:
+                    logger.warning(f"Ошибка при отправке скачанных медиафайлов: {media_err}")
+
+            if not sent_with_media:
+                await send_safe_reply(msg, answer_text + footer, reply_markup=get_chat_control_keyboard())
 
         except Exception as e:
             logger.exception(f"Unhandled error in chat handler: {e}")

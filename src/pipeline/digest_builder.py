@@ -156,21 +156,21 @@ class DigestBuilder:
 
         if tg_channels:
             tg_collector = TelegramWebCollector(tg_channels)
-            tg_items = await tg_collector.fetch_all(limit_per_channel=6)
+            tg_items = await tg_collector.fetch_all(limit_per_channel=15)
             all_items.extend(tg_items)
 
         if rss_feeds:
             rss_collector = RSSCollector(rss_feeds)
-            rss_items = await rss_collector.fetch_all(limit_per_feed=6)
+            rss_items = await rss_collector.fetch_all(limit_per_feed=8)
             all_items.extend(rss_items)
 
-        # Дедупликация через БД
-        unseen = self.storage.filter_unseen_items(all_items)
-        logger.info(f"Собрано {len(all_items)} публикаций, из них новых: {len(unseen)}")
+        # Всегда сохраняем полный буфер свежих публикаций для чата, Discover и Android API
+        if all_items:
+            self.storage.save_news_items(all_items)
 
-        # Сохраняем свежие публикации в ленту новостей для Android / Web API
-        if unseen:
-            self.storage.save_news_items(unseen)
+        # Дедупликация через БД только для формирования утреннего дайджеста
+        unseen = self.storage.filter_unseen_items(all_items)
+        logger.info(f"Собрано {len(all_items)} публикаций, из них новых для дайджеста: {len(unseen)}")
 
         # Фильтрация по стоп-словам из preferences
         prefs = load_preferences()

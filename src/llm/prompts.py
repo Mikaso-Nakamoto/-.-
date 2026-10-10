@@ -77,6 +77,16 @@ def markdown_to_telegram_html(text: str) -> str:
 
     text = re.sub(r'<(/?(?:blockquote|b|i|u|s|a|pre|code|tg-spoiler)(?:\s+[^>]*)?)>', save_allowed, text, flags=re.IGNORECASE)
 
+    # 4.1. Преобразуем цитаты Markdown (> цитата -> <blockquote>цитата</blockquote>)
+    def save_md_quote(m):
+        q_lines = [re.sub(r'^\s*>\s?', '', l) for l in m.group(0).split('\n') if l.strip()]
+        q_text = html.escape("\n".join(q_lines))
+        idx = len(allowed_tags)
+        allowed_tags.append(f"<blockquote>{q_text}</blockquote>")
+        return f"XZXALLOWEDTAG{idx}XZX"
+
+    text = re.sub(r'(?m)^(?:>[^\n]*\n?)+', save_md_quote, text)
+
     # 5. Экранируем оставшиеся HTML-символы (<, >, &)
     text = html.escape(text)
 
