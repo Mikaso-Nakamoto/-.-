@@ -280,23 +280,36 @@ def extract_clean_digest_post(raw_text: str, date_str: str) -> str:
                 if not l or l.startswith("|") or l.startswith("#"):
                     continue
                 # Если первая строчка — заголовок новости без двоеточия
-                if not headline and re.match(r'^[\*\-•]\s+[^:]{5,100}$', l):
+                if not headline and re.match(r'^[\*\-•]\s+[^:]{5,120}$', l):
                     headline = re.sub(r'^[\*\-•]\s+', '', l).strip()
                     continue
                 # Очищаем маркер списка, сохраняя форматирование жирного текста
-                clean_l = re.sub(r'^\s*[\*\-•]\s+', '', l).strip()
+                clean_l = re.sub(r'^\s*(?:[\*\-•]|\d+[\.\)])\s*', '', l).strip()
+                clean_l = re.sub(r'\[([^\]]+)\]\((https?://[^\)]+)\)', r'<a href="\2">\1</a>', clean_l)
                 clean_l = re.sub(r'\*\*([^\*]+?)\*\*', r'<b>\1</b>', clean_l)
-                if clean_l and len(clean_l) > 5:
+                if clean_l and len(clean_l) > 10 and not clean_l.startswith("http"):
                     lines.append(f"• {clean_l}")
+
+            # Если явных маркеров не было — разбиваем сырой текст абзаца на содержательные предложения!
+            if not lines:
+                sentences = re.split(r'(?<=[.!?])\s+', sec_body)
+                for s in sentences:
+                    s_clean = s.strip()
+                    s_clean = re.sub(r'\[([^\]]+)\]\((https?://[^\)]+)\)', r'<a href="\2">\1</a>', s_clean)
+                    s_clean = re.sub(r'\*\*([^\*]+?)\*\*', r'<b>\1</b>', s_clean)
+                    if len(s_clean) > 15 and not s_clean.startswith("http") and not s_clean.startswith("#"):
+                        lines.append(f"• {s_clean}")
+                    if len(lines) >= 3:
+                        break
 
             # Формируем заголовок блока
             full_title = sec_title
             if headline and headline.lower() not in sec_title.lower():
                 full_title = f"{sec_title}: {headline}"
-            full_title = html.escape(full_title.replace("*", "").replace("#", "").strip())
+            full_title = html.unescape(full_title).replace("*", "").replace("#", "").strip()
 
             # Сохраняем 2-4 конкретных содержательных пункта (Тезис, Важность, Детали)
-            body_bullets = "\n".join(lines[:4]) if lines else "• <b>Суть:</b> Подробности события опубликованы в источнике."
+            body_bullets = "\n".join(lines[:4]) if lines else "• <b>Факты:</b> Подробности события опубликованы в источнике."
 
             # Формируем чистую текстовую карточку новости (без цитат и без полос)
             block = f"<b>{c_num} {full_title}</b>\n{body_bullets}{link_html}"
@@ -307,9 +320,9 @@ def extract_clean_digest_post(raw_text: str, date_str: str) -> str:
         for num, (theme, body, cat, link) in enumerate(table_rows[:7]):
             c_num = CIRCLED_NUMS[num] if num < len(CIRCLED_NUMS) else f"[{num+1}]"
             link_html = f'\n🔗 <a href="{link}">Первоисточник</a>' if link else ""
-            clean_theme = html.escape(theme.replace("**", "").replace("*", "").strip())
-            clean_body = html.escape(body.replace("**", "").replace("*", "").strip())
-            clean_cat = html.escape(cat.replace("**", "").replace("*", "").strip())
+            clean_theme = html.unescape(theme.replace("**", "").replace("*", "").strip())
+            clean_body = html.unescape(body.replace("**", "").replace("*", "").strip())
+            clean_cat = html.unescape(cat.replace("**", "").replace("*", "").strip())
 
             items.append(
                 f"<b>{c_num} {clean_cat}: {clean_theme}</b>\n"

@@ -371,13 +371,41 @@ class DigestBuilder:
 
         lead_image_url = source_images[0] if source_images else ""
 
+        # Балансировка выборки новостей по тематикам (Геополитика, СВО, Инфобез, Регионы, Технологии)
+        # Чтобы политические и военные каналы (Дядя Батя, Росснейм, Рыбарь, РИА, Царьград) гарантированно вошли в срез
+        categorized: Dict[str, List[Dict[str, Any]]] = {}
+        for it in items:
+            cat = it.get("category", "Общее")
+            categorized.setdefault(cat, []).append(it)
+
+        # Отбираем до 3 лучших публикаций из каждой категории
+        balanced_items = []
+        priority_keywords = ["сво", "политик", "украин", "юг", "регион", "кибер", "безопасн", "ии", "нейро", "аналитик"]
+        sorted_cats = sorted(
+            categorized.keys(),
+            key=lambda c: any(pk in c.lower() for pk in priority_keywords),
+            reverse=True
+        )
+
+        max_total_items = 25
+        for round_idx in range(4):
+            for cat in sorted_cats:
+                cat_items = categorized[cat]
+                if round_idx < len(cat_items) and len(balanced_items) < max_total_items:
+                    balanced_items.append(cat_items[round_idx])
+
+        if len(balanced_items) < 20:
+            for it in items:
+                if it not in balanced_items and len(balanced_items) < max_total_items:
+                    balanced_items.append(it)
+
         # Формируем сырой текст для LLM с полной фактурой
         raw_chunks = []
-        for i, it in enumerate(items[:20], 1): # До 20 ключевых новостей в контекст
+        for i, it in enumerate(balanced_items, 1):
             raw_chunks.append(
                 f"[{i}] Источник: {it.get('channel', 'Канал')} ({it.get('category', 'Общее')})\n"
                 f"Заголовок: {it.get('title', 'Новость')}\n"
-                f"Текст публикации: {it.get('content', '')[:800]}\n"
+                f"Текст публикации: {it.get('content', '')[:900]}\n"
                 f"Ссылка: {it.get('url', '')}\n"
             )
 

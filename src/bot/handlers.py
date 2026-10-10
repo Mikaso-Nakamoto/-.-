@@ -1013,26 +1013,56 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
         history = storage.get_chat_history(limit=6)
         latest_digest = storage.get_latest_digest()
 
-        recent_items = storage.get_news_feed(limit=30)
-        # Если в базе новостей мало или пусто — оперативно собираем свежие посты из каналов прямо сейчас!
-        if len(recent_items) < 5:
+        q_lower = user_query.lower()
+        is_news_inquiry = any(w in q_lower for w in [
+            "новост", "украин", "сво", "фронт", "трамп", "войн", "политик",
+            "росс", "дядя батя", "рыбар", "ростов", "царьград", "конкретик", "что произошл", "ситуаци"
+        ])
+
+        recent_items = storage.get_news_feed(limit=50)
+        # Если в базе новостей мало или пользователь спрашивает о ситуации/новостях — оперативно собираем свежие посты!
+        if len(recent_items) < 8 or is_news_inquiry:
             try:
                 fresh = await digest_builder.collect_fresh_news()
                 if fresh:
-                    recent_items = storage.get_news_feed(limit=30) or fresh
+                    recent_items = storage.get_news_feed(limit=50) or fresh
             except Exception as e:
                 logger.warning(f"Оперативный сбор новостей для чата: {e}")
 
+        # Ранжируем публикации по релевантности запросу пользователя
+        def item_score(it):
+            score = 0
+            text_corpus = (
+                str(it.get("channel", "")) + " " +
+                str(it.get("title", "")) + " " +
+                str(it.get("content", "")) + " " +
+                str(it.get("category", ""))
+            ).lower()
+
+            if any(w in q_lower for w in ["украин", "сво", "фронт", "войн", "политик", "трамп", "ситуаци"]):
+                if any(k in text_corpus for k in ["украин", "сво", "фронт", "трамп", "киев", "войн", "зеленск", "путин", "переговор"]):
+                    score += 15
+                if any(ch in str(it.get("channel", "")).lower() for ch in ["dyadyabatya", "ross_name", "rybar", "rian", "tass", "tsargrad", "kommersant"]):
+                    score += 10
+
+            for word in q_lower.split():
+                if len(word) > 3 and word in text_corpus:
+                    score += 5
+
+            return score
+
+        sorted_items = sorted(recent_items, key=item_score, reverse=True)
+
         recent_news_str = ""
-        if recent_items:
+        if sorted_items:
             news_parts = []
-            for i, it in enumerate(recent_items[:25], 1):
+            for i, it in enumerate(sorted_items[:22], 1):
                 ch = it.get("channel", "Канал")
                 cat = it.get("category", "Новости")
                 t = it.get("title", "")
-                c = it.get("content", "")[:500]
+                c = it.get("content", "")[:700]
                 u = it.get("url", "")
-                news_parts.append(f"[{i}] Источник: {ch} | Категория: {cat}\nЗаголовок: {t}\nТекст: {c}\nСсылка: {u}")
+                news_parts.append(f"[{i}] Источник: {ch} ({cat})\nЗаголовок: {t}\nТекст публикации: {c}\nСсылка: {u}")
             recent_news_str = "\n---\n".join(news_parts)
 
         try:
