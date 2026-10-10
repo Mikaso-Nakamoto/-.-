@@ -285,6 +285,39 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
             await event.answer(clean_telegram_markdown(text), parse_mode="Markdown", reply_markup=get_main_menu_keyboard(storage.is_chat_mode_active()))
 
     # --------------------------------------------------------------------------
+    # Ручная установка любой модели: /setmodel <provider> <model_slug>
+    # --------------------------------------------------------------------------
+    @r.message(Command("setmodel"))
+    async def cmd_setmodel(msg: Message):
+        if not is_admin(msg.from_user.id):
+            return
+
+        parts = msg.text.strip().split()
+        if len(parts) < 3:
+            text = (
+                "ℹ️ *Установка любой модели вручную:*\n"
+                "`/setmodel <провайдер> <название_модели>`\n\n"
+                "Примеры:\n"
+                "• `/setmodel openrouter qwen/qwen-2.5-72b-instruct:free`\n"
+                "• `/setmodel gemini gemini-1.5-flash`\n"
+                "• `/setmodel groq llama-3.3-70b-versatile`\n"
+                "• `/setmodel local qwen2.5-7b-instruct`"
+            )
+            await msg.answer(clean_telegram_markdown(text), parse_mode="Markdown")
+            return
+
+        provider = parts[1].lower()
+        model_name = parts[2]
+
+        if provider not in ["local", "groq", "gemini", "openrouter"]:
+            await msg.answer("❌ Допустимые провайдеры: `local`, `groq`, `gemini`, `openrouter`", parse_mode="Markdown")
+            return
+
+        llm_router.set_model(provider, model_name)
+        storage.set_setting(f"model_{provider}", model_name)
+        await msg.answer(f"✅ Для провайдера *{provider.upper()}* установлена модель:\n`{model_name}`", parse_mode="Markdown")
+
+    # --------------------------------------------------------------------------
     # ПРЯМОЙ ЧАТ С ИИ
     # --------------------------------------------------------------------------
     @r.message(F.text & ~F.text.startswith("/"))
@@ -325,7 +358,7 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
         storage.add_chat_message("user", user_query)
         storage.add_chat_message("assistant", answer_text)
 
-        footer = f"\n\n🤖 *{res.get('provider').upper()}* (`{res.get('model')}`) • {res.get('latency')}с"
+        footer = f"\n\n🤖 *{res.get('provider').upper()}* (`{res.get('model')}`) • ⏱ {res.get('latency')} сек."
         if res.get("fallback_occurred"):
             footer += " _(failover)_"
 

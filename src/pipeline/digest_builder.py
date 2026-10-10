@@ -100,7 +100,7 @@ class DigestBuilder:
         # Помечаем обработанные новости как прочитанные
         self.storage.mark_items_as_seen(items)
 
-        provider_info = f"\n\n🤖 *Сгенерировано с помощью:* `{llm_res.get('provider')}` (`{llm_res.get('model')}`), за {llm_res.get('latency')}с."
+        provider_info = f"\n\n🤖 *Сгенерировано с помощью:* `{llm_res.get('provider')}` (`{llm_res.get('model')}`), ⏱ {llm_res.get('latency')} сек."
         if llm_res.get("fallback_occurred"):
             provider_info += " *(сработал резервный шлюз)*"
 

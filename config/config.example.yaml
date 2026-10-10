@@ -30,7 +30,7 @@ llm:
   openrouter:
     enabled: true
     api_key: "sk-or-v1-..."
-    model: "google/gemini-2.0-flash-exp:free"
+    model: "qwen/qwen-2.5-72b-instruct:free"
 
 scheduler:
   digest_cron: "50 8 * * *" # Каждый день в 08:50
