@@ -3,6 +3,7 @@ __pycache__/
 *$py.class
 *.so
 .env
+config/config.yaml
 data/
 venv/
 .pytest_cache/

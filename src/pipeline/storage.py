@@ -10,7 +10,21 @@ class Storage:
         self.path = Path(db_path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.learned_pref_file = self.path.parent.parent / "config" / "user_learned_preferences.txt"
+        # Тумблер тестового режима (1 / true): не помечать новости как прочитанные и не сохранять в БД
+        env_test = os.getenv("TEST_MODE", "").lower() in ["1", "true", "yes"] or os.getenv("SAVE_TO_DATABASE", "").lower() in ["0", "false", "no"]
+        self.default_test_mode = env_test if os.getenv("TEST_MODE") or os.getenv("SAVE_TO_DATABASE") else True
         self._init_db()
+
+    def is_test_mode(self) -> bool:
+        """Проверяет состояние тумблера: если true/1, то данные никуда не сохраняются"""
+        setting = self.get_setting("test_mode_no_save")
+        if setting is not None:
+            return setting in ["1", "true", "True", "yes", "1"]
+        return self.default_test_mode
+
+    def set_test_mode(self, enabled: bool):
+        """Переключает тумблер тестового режима"""
+        self.set_setting("test_mode_no_save", "1" if enabled else "0")
 
     def _get_connection(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path)
@@ -102,6 +116,12 @@ class Storage:
         return hashlib.sha256(unique_key.encode("utf-8")).hexdigest()
 
     def filter_unseen_items(self, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        # Если включен тумблер ТЕСТ — не отсекаем новости, отдаем все собранные для тестов
+        if self.is_test_mode():
+            for item in items:
+                item["item_hash"] = self._hash_item(item)
+            return items
+
         unseen = []
         with self._get_connection() as conn:
             for item in items:
@@ -113,6 +133,10 @@ class Storage:
         return unseen
 
     def mark_items_as_seen(self, items: List[Dict[str, Any]]):
+        # Если включен тумблер ТЕСТ — никуда не записываем во избежание скрытия новостей
+        if self.is_test_mode():
+            return
+
         with self._get_connection() as conn:
             for item in items:
                 h = item.get("item_hash") or self._hash_item(item)
@@ -123,6 +147,10 @@ class Storage:
 
     def save_news_items(self, items: List[Dict[str, Any]]):
         with self._get_connection() as conn:
+            # В тестовом режиме заменяем старые новости свежими, чтобы не копить старый мусор
+            if self.is_test_mode():
+                conn.execute("DELETE FROM news_feed")
+
             for it in items:
                 h = it.get("item_hash") or self._hash_item(it)
                 conn.execute("""
@@ -175,6 +203,8 @@ class Storage:
             return [dict(row) for row in rows]
 
     def save_digest(self, digest_text: str, provider: str, count: int):
+        if self.is_test_mode():
+            return
         with self._get_connection() as conn:
             conn.execute(
                 "INSERT INTO digest_history (provider_used, items_count, digest_text) VALUES (?, ?, ?)",
@@ -198,6 +228,8 @@ class Storage:
         report_md_path: str,
         lead_image_url: str = ""
     ) -> int:
+        if self.is_test_mode():
+            return 0
         with self._get_connection() as conn:
             cur = conn.execute("""
                 INSERT INTO full_digests 
@@ -243,6 +275,8 @@ class Storage:
     # История диалога
     # --------------------------------------------------------------------------
     def add_chat_message(self, role: str, content: str):
+        if self.is_test_mode():
+            return
         with self._get_connection() as conn:
             conn.execute("INSERT INTO chat_history (role, content) VALUES (?, ?)", (role, content))
 

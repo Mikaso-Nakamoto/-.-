@@ -442,6 +442,39 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
         )
 
     # --------------------------------------------------------------------------
+    # Тумблер тестового режима (не сохранять в БД во время тестов): /testmode
+    # --------------------------------------------------------------------------
+    @r.message(Command("testmode"))
+    async def cmd_toggle_testmode(msg: Message):
+        if not is_admin(msg.from_user.id):
+            return
+        args = msg.text.strip().split()
+        if len(args) > 1:
+            val = args[1].lower()
+            if val in ["1", "on", "true", "вкл"]:
+                storage.set_test_mode(True)
+            elif val in ["0", "off", "false", "выкл"]:
+                storage.set_test_mode(False)
+        else:
+            current = storage.is_test_mode()
+            storage.set_test_mode(not current)
+
+        now_mode = storage.is_test_mode()
+        status_text = (
+            "🟢 <b>ВКЛЮЧЕН (1 / True)</b>\n"
+            "<i>Новости НЕ помечаются прочитанными и НЕ сохраняются в постоянную базу. "
+            "Дайджесты и чат не засоряют диск. Можно тестировать бесконечно!</i>"
+        ) if now_mode else (
+            "⚪️ <b>ВЫКЛЮЧЕН (0 / False)</b>\n"
+            "<i>Боевой режим: новости помечаются как прочитанные и архивируются в постоянную БД.</i>"
+        )
+        await send_safe_reply(
+            msg,
+            f"⚙️ <b>Тумблер тестового режима:</b>\n\n{status_text}\n\n"
+            f"Команды: <code>/testmode on</code> или <code>/testmode off</code>"
+        )
+
+    # --------------------------------------------------------------------------
     # Скачивание исходного Markdown файла дайджеста
     # --------------------------------------------------------------------------
     @r.callback_query(F.data.startswith("getmd__"))
@@ -973,12 +1006,26 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
         history = storage.get_chat_history(limit=6)
         latest_digest = storage.get_latest_digest()
 
-        recent_items = storage.get_news_feed(limit=10)
+        recent_items = storage.get_news_feed(limit=30)
+        # Если в базе новостей мало или пусто — оперативно собираем свежие посты из каналов прямо сейчас!
+        if len(recent_items) < 5:
+            try:
+                fresh = await digest_builder.collect_fresh_news()
+                if fresh:
+                    recent_items = storage.get_news_feed(limit=30) or fresh
+            except Exception as e:
+                logger.warning(f"Оперативный сбор новостей для чата: {e}")
+
         recent_news_str = ""
         if recent_items:
             news_parts = []
-            for i, it in enumerate(recent_items[:8], 1):
-                news_parts.append(f"[{i}] {it.get('title')}\n{it.get('content')[:350]}\nСсылка: {it.get('url')}")
+            for i, it in enumerate(recent_items[:25], 1):
+                ch = it.get("channel", "Канал")
+                cat = it.get("category", "Новости")
+                t = it.get("title", "")
+                c = it.get("content", "")[:500]
+                u = it.get("url", "")
+                news_parts.append(f"[{i}] Источник: {ch} | Категория: {cat}\nЗаголовок: {t}\nТекст: {c}\nСсылка: {u}")
             recent_news_str = "\n---\n".join(news_parts)
 
         try:
