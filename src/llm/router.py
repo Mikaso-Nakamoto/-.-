@@ -11,6 +11,8 @@ logger = logging.getLogger(__name__)
 
 # Список надежных бесплатных моделей OpenRouter на замену в случае 404
 OPENROUTER_FREE_FALLBACKS = [
+    "google/gemini-3.5-flash:free",
+    "google/gemini-3.5-flash-lite:free",
     "qwen/qwen-2.5-72b-instruct:free",
     "deepseek/deepseek-chat:free",
     "deepseek/deepseek-r1:free",
@@ -20,6 +22,8 @@ OPENROUTER_FREE_FALLBACKS = [
 
 POPULAR_MODELS = {
     "openrouter": [
+        ("Gemini 3.5 Flash (Free)", "google/gemini-3.5-flash:free"),
+        ("Gemini 3.5 Flash-Lite (Free)", "google/gemini-3.5-flash-lite:free"),
         ("Qwen 2.5 72B (Free)", "qwen/qwen-2.5-72b-instruct:free"),
         ("DeepSeek Chat (Free)", "deepseek/deepseek-chat:free"),
         ("DeepSeek R1 (Free)", "deepseek/deepseek-r1:free"),
@@ -32,8 +36,9 @@ POPULAR_MODELS = {
         ("Gemma 2 9B IT", "gemma2-9b-it")
     ],
     "gemini": [
-        ("Gemini 1.5 Flash", "gemini-1.5-flash"),
-        ("Gemini 1.5 Pro", "gemini-1.5-pro")
+        ("Gemini 3.5 Flash (Основная)", "gemini-3.5-flash"),
+        ("Gemini 3.5 Flash-Lite (Быстрая)", "gemini-3.5-flash-lite"),
+        ("Gemini 3.5 Pro (Глубокая аналитика)", "gemini-3.5-pro")
     ],
     "local": [
         ("Qwen 2.5 7B (LM Studio)", "qwen2.5-7b-instruct")
@@ -47,8 +52,8 @@ class LLMRouter:
         self.active_models = {
             "local": config.local.model or "qwen2.5-7b-instruct",
             "groq": config.groq.model or "llama-3.3-70b-versatile",
-            "gemini": config.gemini.model or "gemini-1.5-flash",
-            "openrouter": config.openrouter.model or "qwen/qwen-2.5-72b-instruct:free"
+            "gemini": config.gemini.model or "gemini-3.5-flash",
+            "openrouter": config.openrouter.model or "google/gemini-3.5-flash:free"
         }
 
     def set_provider(self, provider: str) -> bool:
