@@ -14,6 +14,9 @@ SOURCES_FILE = BASE_DIR / "config" / "sources.yaml"
 SOURCES_EXAMPLE = BASE_DIR / "config" / "sources.example.yaml"
 
 DEFAULT_CATEGORIES = [
+    "OpenSource & Полезный софт",
+    "Военно-политическая аналитика & СВО",
+    "Кибербезопасность & IT",
     "Нейросети и ИИ",
     "DevOps & Self-Hosted",
     "Разработка и Кодинг",
@@ -23,28 +26,20 @@ DEFAULT_CATEGORIES = [
 
 def clean_channel_username(raw: str) -> str:
     """
-    Очищает введенную пользователем строку (ссылку, юзернейм или ссылку биржи) до чистого имени канала.
+    Очищает введенную пользователем строку (ссылку, юзернейм или инвайт) до чистого имени канала.
     Примеры:
       @xakep_ru -> xakep_ru
       https://t.me/ai_newz -> ai_newz
       https://t.me/s/habr_com/ -> habr_com
       t.me/proglib -> proglib
-      https://t.me/+ieit_MggnZZkMWIy -> +ieit_MggnZZkMWIy
-      https://telega.in/channels/+TAijOjWcpARjOTcy/card -> +TAijOjWcpARjOTcy
+      https://t.me/+ieit_MggnZZkMWIy -> it_shelter (через INVITE_MAP)
+      https://telega.in/channels/+TAijOjWcpARjOTcy/card -> github_radar (через INVITE_MAP)
       https://telega.in/channels/Dev_Bubble/card -> Dev_Bubble
     """
     if not raw:
         return ""
-    s = raw.strip()
-    # Убираем ссылки с telega.in
-    s = re.sub(r'^(?:https?://)?(?:www\.)?telega\.in/channels/', '', s, flags=re.IGNORECASE)
-    s = re.sub(r'/card/?$', '', s, flags=re.IGNORECASE)
-    # Убираем t.me префиксы
-    s = re.sub(r'^(?:https?://)?(?:www\.)?(?:t\.me/)?(?:s/)?', '', s, flags=re.IGNORECASE)
-    s = s.lstrip('@').strip().rstrip('/')
-    # Убираем возможные GET-параметры и хэши
-    s = s.split('?')[0].split('#')[0]
-    return s.strip()
+    from src.collectors.telegram_collector import resolve_channel_username
+    return resolve_channel_username(raw)
 
 def load_sources_data() -> Dict[str, Any]:
     if not SOURCES_FILE.exists():
@@ -205,6 +200,7 @@ async def determine_channel_category_with_ai(username_or_url: str, router) -> st
 Твоя задача — проанализировать публикации Telegram-канала '@{clean_user}' и определить одну точную, емкую тематическую категорию (2-4 слова на русском языке).
 
 Примеры стандартных категорий:
+- OpenSource & Полезный софт
 - Военно-политическая аналитика & СВО
 - Мировая политика & Новости
 - Ситуация на Украине & Фронт
@@ -217,8 +213,9 @@ async def determine_channel_category_with_ai(username_or_url: str, router) -> st
 
 ПРАВИЛА КЛАССИФИКАЦИИ:
 1. Если посты посвящены конфликту на Украине, СВО, действиям армии, геополитике, мировым лидерам или санкциям — используй категорию «Военно-политическая аналитика & СВО» или «Мировая политика & Новости». НЕЛЬЗЯ классифицировать политические каналы как «Наука и будущее»!
-2. Если канал посвящен технологиям/ИИ/программированию — используй соответствующую IT-категорию.
-3. Ты также можешь создать новую точную категорию (2-4 слова), точно отражающую суть публикаций.
+2. Если канал публикует бесплатный софт, утилиты, альтернативы Adobe/Office, репозитории GitHub и открытый код — используй категорию «OpenSource & Полезный софт».
+3. Если канал посвящен технологиям/ИИ/программированию — используй соответствующую IT-категорию.
+4. Ты также можешь создать новую точную категорию (2-4 слова), точно отражающую суть публикаций.
 
 ПУБЛИКАЦИИ КАНАЛА:
 {post_samples}

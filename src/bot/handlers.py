@@ -91,6 +91,9 @@ class SourceStates(StatesGroup):
     waiting_for_rss_url = State()
 
 CATEGORIES_MAP = {
+    "soft": "OpenSource & Полезный софт",
+    "svo": "Военно-политическая аналитика & СВО",
+    "sec": "Кибербезопасность & IT",
     "ai": "Нейросети и ИИ",
     "devops": "DevOps & Self-Hosted",
     "dev": "Разработка и Кодинг",
@@ -596,10 +599,11 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
             return
 
         clean_user = clean_channel_username(raw_input)
-        if not clean_user or not re.match(r'^[a-zA-Z0-9_]{3,35}$', clean_user):
+        if not clean_user or not re.match(r'^\+?[a-zA-Z0-9_-]{3,45}$', clean_user):
             await send_safe_reply(
                 msg,
-                "❌ Некорректный юзернейм канала. Допустимы только буквы A-Z, цифры и _ (например, <code>@ai_newz</code>).\n"
+                "❌ Некорректный юзернейм или ссылка канала.\n"
+                "Поддерживаются: <code>@channel</code>, <code>https://t.me/channel</code>, а также инвайт-ссылки <code>https://t.me/+...</code>.\n"
                 "Попробуйте еще раз или нажмите отмену:",
                 reply_markup=get_cancel_keyboard("btn_sources")
             )
@@ -1043,6 +1047,12 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
                 if any(k in text_corpus for k in ["украин", "сво", "фронт", "трамп", "киев", "войн", "зеленск", "путин", "переговор"]):
                     score += 15
                 if any(ch in str(it.get("channel", "")).lower() for ch in ["dyadyabatya", "ross_name", "rybar", "rian", "tass", "tsargrad", "kommersant"]):
+                    score += 10
+
+            if any(w in q_lower for w in ["софт", "программ", "утилит", "аналог", "photocraft", "wordcraft", "бесплатн", "замен", "инструмент", "github", "релиз"]):
+                if any(k in text_corpus for k in ["софт", "утилит", "github", "релиз", "photocraft", "wordcraft", "аналог", "бесплатно", "замена", "инструмент"]):
+                    score += 15
+                if any(ch in str(it.get("channel", "")).lower() for ch in ["it_shelter", "github_radar", "proglib", "dev_bubble", "xakep", "opennet"]):
                     score += 10
 
             for word in q_lower.split():

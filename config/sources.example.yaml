@@ -22,10 +22,10 @@ sources:
       category: "Hardware & Гаджеты"
     - username: "proglib"
       category: "Разработка и GameDev"
-    - username: "+TAijOjWcpARjOTcy"
-      category: "IT & Разработка"
-    - username: "+ieit_MggnZZkMWIy"
-      category: "Кибербезопасность & IT"
+    - username: "it_shelter"
+      category: "OpenSource & Полезный софт"
+    - username: "github_radar"
+      category: "GitHub & Разработка"
 
     # Российские федеральные и новостные каналы (СВО, политика РФ)
     - username: "rian_ru"

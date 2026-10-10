@@ -7,6 +7,36 @@ from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
 
+# Словарь известных инвайт-хэшей в публичные каналы
+INVITE_MAP: Dict[str, str] = {
+    "+ieit_mggnzzkmwiy": "it_shelter",
+    "ieit_mggnzzkmwiy": "it_shelter",
+    "+taijojwcparjotcy": "github_radar",
+    "taijojwcparjotcy": "github_radar",
+}
+
+def resolve_channel_username(raw: str) -> str:
+    """
+    Приводит юзернейм или инвайт-ссылку к каноническому имени публичного канала.
+    """
+    if not raw:
+        return ""
+    cleaned = raw.strip()
+    # Убираем ссылки с telega.in
+    cleaned = re.sub(r'^(?:https?://)?(?:www\.)?telega\.in/channels/', '', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'/card/?$', '', cleaned, flags=re.IGNORECASE)
+    # Убираем префиксы t.me, s/ и joinchat/
+    cleaned = re.sub(r'^(?:https?://)?(?:www\.)?(?:t\.me/)?(?:s/)?(?:joinchat/)?', '', cleaned, flags=re.IGNORECASE)
+    cleaned = cleaned.lstrip('@').strip().rstrip('/')
+    cleaned = cleaned.split('?')[0].split('#')[0]
+
+    cleaned_lower = cleaned.lower()
+    if cleaned_lower in INVITE_MAP:
+        return INVITE_MAP[cleaned_lower]
+    if f"+{cleaned_lower}" in INVITE_MAP:
+        return INVITE_MAP[f"+{cleaned_lower}"]
+    return cleaned
+
 class TelegramWebCollector:
     """
     Сборщик публичных сообщений из Telegram-каналов через официальный Web Preview (t.me/s/channel).
@@ -20,13 +50,15 @@ class TelegramWebCollector:
         }
 
     async def fetch_channel(self, client: httpx.AsyncClient, channel_info: Dict[str, str], limit: int = 10) -> List[Dict[str, Any]]:
-        username = channel_info.get("username", "").lstrip("@").strip()
+        raw_user = channel_info.get("username", "").strip()
+        username = resolve_channel_username(raw_user)
         category = channel_info.get("category", "Общее")
         if not username:
             return []
 
         target_user = username
-        # Если передан инвайт-хэш (+...), пробуем разрешить его в публичный канал
+
+        # Если передан иной инвайт-хэш (+...), пробуем разрешить его в публичный канал
         if target_user.startswith("+"):
             try:
                 invite_url = f"https://t.me/{target_user}"
@@ -35,12 +67,23 @@ class TelegramWebCollector:
                     m = re.search(r'tg://resolve\?domain=([a-zA-Z0-9_]+)', r_invite.text)
                     if m and not m.group(1).lower().startswith(("joinchat", "+")):
                         target_user = m.group(1)
+                        INVITE_MAP[username.lower()] = target_user
                         logger.info(f"Инвайт {username} успешно разрешен в публичный канал @{target_user}")
                     else:
                         m2 = re.search(r'<meta property="og:url" content="https?://t\.me/([a-zA-Z0-9_]+)"', r_invite.text)
                         if m2 and not m2.group(1).lower().startswith(("joinchat", "+")):
                             target_user = m2.group(1)
+                            INVITE_MAP[username.lower()] = target_user
                             logger.info(f"Инвайт {username} разрешен через og:url в @{target_user}")
+                        else:
+                            # Пробуем по заголовку канала (например IT_Shelter -> it_shelter)
+                            m3 = re.search(r'<meta property="og:title" content="([^"]+)"', r_invite.text)
+                            if m3:
+                                cand = re.sub(r'[^a-zA-Z0-9_]', '', m3.group(1).strip().lower().replace(" ", "_"))
+                                if 3 <= len(cand) <= 32:
+                                    target_user = cand
+                                    INVITE_MAP[username.lower()] = target_user
+                                    logger.info(f"Инвайт {username} разрешен по названию страницы в @{target_user}")
             except Exception as e:
                 logger.debug(f"Не удалось разрешить инвайт {username}: {e}")
 

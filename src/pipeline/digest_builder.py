@@ -29,10 +29,123 @@ class DigestBuilder:
 
     def _is_blacklisted(self, text: str, blacklist: List[str]) -> bool:
         lower_text = text.lower()
+        # Если в публикации содержатся явные признаки полезного софта / open-source утилит / репозиториев,
+        # защищаем её от случайного отсечения по словам вроде "реклама", "промокод" или "ссылка"
+        software_indicators = [
+            "github.com", "open source", "релиз", "утилита", "софт", "аналог",
+            "бесплатный", "репозиторий", "версия", "photocraft", "wordcraft", "инструмент", "soft"
+        ]
+        if any(ind in lower_text for ind in software_indicators):
+            # Проверяем только жесткий скам/казино
+            hard_scam = ["казино", "ставки на спорт", "1win", "1xbet", "порно", "крипто-скам"]
+            return any(scam in lower_text for scam in hard_scam)
+
         for word in blacklist:
             if word.lower() in lower_text:
                 return True
         return False
+
+    def _stratified_balance_items(self, items: List[Dict[str, Any]], target_count: int = 20) -> List[Dict[str, Any]]:
+        """
+        Стратифицированная балансировка выборки новостей по ключевым доменам:
+        - Полезный софт & OpenSource (IT_Shelter, GitHub Radar, OpenNet)
+        - Геополитика & СВО (Дядя Батя, Росснейм, Рыбарь, РИА, ТАСС)
+        - Кибербезопасность & IT (Хакер, CVE, OSINT)
+        - Нейросети & Железо (AI, GPU, чипы)
+        - Регионы и Экономика
+        """
+        categorized: Dict[str, List[Dict[str, Any]]] = {}
+        for it in items:
+            cat = it.get("category", "Общее")
+            categorized.setdefault(cat, []).append(it)
+
+        priority_keywords = [
+            "софт", "soft", "opensource", "open-source", "утилит", "github", "разработк",
+            "сво", "политик", "украин", "юг", "регион", "кибер", "безопасн", "ии", "нейро", "аналитик"
+        ]
+        sorted_cats = sorted(
+            categorized.keys(),
+            key=lambda c: any(pk in c.lower() for pk in priority_keywords),
+            reverse=True
+        )
+
+        balanced: List[Dict[str, Any]] = []
+        for round_idx in range(4):
+            for cat in sorted_cats:
+                cat_items = categorized[cat]
+                if round_idx < len(cat_items) and len(balanced) < target_count:
+                    balanced.append(cat_items[round_idx])
+
+        if len(balanced) < target_count:
+            for it in items:
+                if it not in balanced and len(balanced) < target_count:
+                    balanced.append(it)
+
+        return balanced
+
+    async def curate_items_with_ai(self, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Этап 1: Быстрый ИИ-Куратор (AI Content Curator).
+        Оценивает пул собранных публикаций и отбирает от 12 до 20 самых ценных материалов,
+        гарантируя присутствие полезного софта/утилит, геополитики/СВО, кибербезопасности и ИИ,
+        и отсекая инфошум, рекламу и дубликаты.
+        """
+        if len(items) <= 15:
+            return items
+
+        from src.llm.prompts import (
+            AI_CURATOR_SYSTEM_PROMPT,
+            build_curator_user_prompt,
+            parse_curator_selection
+        )
+
+        prefs = load_preferences()
+        interests = prefs.get("interests", [])
+        learned_prefs = self.storage.get_learned_preferences_summary()
+
+        curator_user_prompt = build_curator_user_prompt(
+            candidate_items=items,
+            user_interests=interests,
+            learned_preferences=learned_prefs
+        )
+
+        try:
+            logger.info(f"Запуск ИИ-куратора для пула из {len(items)} публикаций...")
+            res = await self.router.generate_response(
+                task="curator",
+                user_prompt=curator_user_prompt,
+                override_system_prompt=AI_CURATOR_SYSTEM_PROMPT
+            )
+
+            if res.get("success"):
+                content = res.get("content", "")
+                selected_ids = parse_curator_selection(content, len(items))
+                selected_items = [items[i - 1] for i in selected_ids if 1 <= i <= len(items)]
+
+                # Если куратор отобрал достаточное число качественных статей (>= 10)
+                if len(selected_items) >= 10:
+                    logger.info(f"ИИ-куратор успешно отобрал {len(selected_items)} публикаций.")
+                    return selected_items
+                elif len(selected_items) > 0:
+                    logger.info(f"ИИ-куратор отобрал {len(selected_items)} публикаций. Дополняем стратифицированной выборкой...")
+                    fallback_pool = self._stratified_balance_items(items, target_count=20)
+                    combined = list(selected_items)
+                    seen_urls = {it.get("url") for it in combined if it.get("url")}
+                    for it in fallback_pool:
+                        u = it.get("url")
+                        if u not in seen_urls:
+                            combined.append(it)
+                            if u:
+                                seen_urls.add(u)
+                        if len(combined) >= 20:
+                            break
+                    return combined
+        except Exception as e:
+            logger.warning(f"Ошибка вызова ИИ-куратора: {e}")
+
+        # Фолбэк на стратифицированный отбор при сбое или недоступности ИИ
+        logger.info("Применение резервного стратифицированного отбора публикаций...")
+        return self._stratified_balance_items(items, target_count=20)
 
     async def collect_fresh_news(self) -> List[Dict[str, Any]]:
         sources = load_sources().get("sources", {})
@@ -346,10 +459,15 @@ class DigestBuilder:
                 "lead_image_url": ""
             }
 
-        # Извлекаем разнообразные изображения/обложки видео из разных каналов и лент
+        # ЭТАП 1: ИИ-Куратор (AI Content Curator)
+        # Отбирает топ-15–20 самых ценных материалов (включая полезный софт, утилиты, фронт, геополитику, ИИ)
+        curated_items = await self.curate_items_with_ai(items)
+        logger.info(f"Выборка сформирована: {len(curated_items)} публикаций передаются генератору дайджеста.")
+
+        # Извлекаем разнообразные изображения/обложки видео из отобранных куратором публикаций
         source_images = []
         seen_channels = set()
-        for it in items:
+        for it in curated_items:
             img = it.get("image_url")
             ch = it.get("channel", "")
             if img and img.startswith("http") and img not in source_images:
@@ -360,7 +478,7 @@ class DigestBuilder:
                     if len(source_images) >= 6:
                         break
 
-        # Добираем до 6 изображений, если из уникальных каналов набралось меньше
+        # Добираем до 6 изображений из общего пула, если из кураторской выборки набралось меньше
         if len(source_images) < 4:
             for it in items:
                 img = it.get("image_url")
@@ -371,40 +489,13 @@ class DigestBuilder:
 
         lead_image_url = source_images[0] if source_images else ""
 
-        # Балансировка выборки новостей по тематикам (Геополитика, СВО, Инфобез, Регионы, Технологии)
-        # Чтобы политические и военные каналы (Дядя Батя, Росснейм, Рыбарь, РИА, Царьград) гарантированно вошли в срез
-        categorized: Dict[str, List[Dict[str, Any]]] = {}
-        for it in items:
-            cat = it.get("category", "Общее")
-            categorized.setdefault(cat, []).append(it)
-
-        # Отбираем до 3 лучших публикаций из каждой категории
-        balanced_items = []
-        priority_keywords = ["сво", "политик", "украин", "юг", "регион", "кибер", "безопасн", "ии", "нейро", "аналитик"]
-        sorted_cats = sorted(
-            categorized.keys(),
-            key=lambda c: any(pk in c.lower() for pk in priority_keywords),
-            reverse=True
-        )
-
-        max_total_items = 25
-        for round_idx in range(4):
-            for cat in sorted_cats:
-                cat_items = categorized[cat]
-                if round_idx < len(cat_items) and len(balanced_items) < max_total_items:
-                    balanced_items.append(cat_items[round_idx])
-
-        if len(balanced_items) < 20:
-            for it in items:
-                if it not in balanced_items and len(balanced_items) < max_total_items:
-                    balanced_items.append(it)
-
+        # ЭТАП 2: LLM Синтезатор аналитического дайджеста
         # Формируем сырой текст для LLM с полной фактурой
         raw_chunks = []
-        for i, it in enumerate(balanced_items, 1):
+        for i, it in enumerate(curated_items, 1):
             raw_chunks.append(
                 f"[{i}] Источник: {it.get('channel', 'Канал')} ({it.get('category', 'Общее')})\n"
-                f"Заголовок: {it.get('title', 'Новость')}\n"
+                f"Заголовок: {it.get('title', 'Новость / Релиз')}\n"
                 f"Текст публикации: {it.get('content', '')[:900]}\n"
                 f"Ссылка: {it.get('url', '')}\n"
             )
@@ -422,7 +513,7 @@ class DigestBuilder:
             learned_preferences=learned_prefs
         )
 
-        logger.info("Отправка сформированного пакета новостей в LLM...")
+        logger.info("Отправка сформированного пакета новостей и софта в LLM...")
         llm_res = await self.router.generate_response(task="digest", user_prompt=user_prompt)
 
         if not llm_res.get("success"):

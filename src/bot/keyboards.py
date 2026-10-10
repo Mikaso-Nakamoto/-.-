@@ -155,6 +155,9 @@ def get_category_selection_keyboard(clean_username: str, ai_category: str = "") 
         buttons.append([InlineKeyboardButton(text=f"🤖 Принять: {clean_ai_label}", callback_data=f"setchcat__{clean_username}__ai_detected")])
 
     categories = [
+        ("📦 OpenSource & Софт", "soft"),
+        ("⚔️ СВО & Геополитика", "svo"),
+        ("🛡 Кибербезопасность", "sec"),
         ("🧠 Нейросети и ИИ", "ai"),
         ("🛠 DevOps & Self-Host", "devops"),
         ("💻 Разработка и Кодинг", "dev"),
