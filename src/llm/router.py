@@ -65,10 +65,10 @@ POPULAR_MODELS = {
         ("Gemma 2 9B IT", "gemma2-9b-it")
     ],
     "gemini": [
-        ("Gemini 2.0 Flash (Рекомендуемая)", "gemini-2.0-flash"),
-        ("Gemini 2.0 Flash-Lite", "gemini-2.0-flash-lite"),
-        ("Gemini 1.5 Flash", "gemini-1.5-flash"),
-        ("Gemini 1.5 Pro", "gemini-1.5-pro")
+        ("Gemini 3.5 Flash (Рекомендуемая 2026)", "gemini-3.5-flash"),
+        ("Gemini 3.5 Flash-Lite", "gemini-3.5-flash-lite"),
+        ("Gemini 2.5 Flash", "gemini-2.5-flash"),
+        ("Gemini 2.0 Flash", "gemini-2.0-flash")
     ],
     "local": [
         ("Qwen 2.5 7B (LM Studio)", "qwen2.5-7b-instruct")
@@ -82,7 +82,7 @@ class LLMRouter:
         self.active_models = {
             "local": config.local.model or "qwen2.5-7b-instruct",
             "groq": config.groq.model or "llama-3.3-70b-versatile",
-            "gemini": config.gemini.model or "gemini-2.0-flash",
+            "gemini": config.gemini.model or "gemini-3.5-flash",
             "openrouter": config.openrouter.model or "google/gemini-2.0-flash-exp:free"
         }
 
@@ -229,13 +229,14 @@ class LLMRouter:
                     if fb not in models_to_test:
                         models_to_test.append(fb)
             elif prov == "gemini":
-                # Google AI Studio официальные слаги
+                # Google AI Studio официальные слаги (стандарт 2026 года и резерв)
                 gemini_pool = [
                     initial_model,
+                    "gemini-3.5-flash",
+                    "gemini-3.5-flash-lite",
+                    "gemini-2.5-flash",
                     "gemini-2.0-flash",
-                    "gemini-2.0-flash-lite",
-                    "gemini-1.5-flash",
-                    "gemini-1.5-pro"
+                    "gemini-2.0-flash-lite"
                 ]
                 models_to_test = []
                 for m in gemini_pool:

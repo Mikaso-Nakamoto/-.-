@@ -25,15 +25,21 @@ class DigestScheduler:
         self.timezone_name = os.getenv("TZ") or prefs.get("user", {}).get("timezone", "Europe/Moscow")
 
     async def _send_morning_digest(self):
-        if not self.admin_id:
+        target_admin = self.admin_id
+        if not target_admin:
+            saved_id = self.builder.storage.get_setting("admin_id")
+            if saved_id and saved_id.isdigit():
+                target_admin = int(saved_id)
+
+        if not target_admin:
             logger.warning("Admin ID не настроен. Дайджест некому отправить.")
             return
 
-        logger.info(f"Запуск планового утреннего дайджеста (08:50, {self.timezone_name})...")
+        logger.info(f"Запуск планового утреннего дайджеста (08:50, {self.timezone_name}) для ID={target_admin}...")
         try:
             res = await self.builder.generate_digest()
             if not res.get("success"):
-                await self.bot.send_message(self.admin_id, f"⚠️ Не удалось сформировать утреннюю сводку: {res.get('text')}")
+                await self.bot.send_message(target_admin, f"⚠️ Не удалось сформировать утреннюю сводку: {res.get('text')}")
                 return
 
             post_html = res.get("telegram_post_html") or res.get("text")
@@ -61,11 +67,11 @@ class DigestScheduler:
             try:
                 if len(full_post) > 4000:
                     for x in range(0, len(full_post), 4000):
-                        await self.bot.send_message(self.admin_id, full_post[x:x+4000], parse_mode="HTML")
-                    await self.bot.send_message(self.admin_id, "💬 <b>Действия со сводкой:</b>", parse_mode="HTML", reply_markup=kb)
+                        await self.bot.send_message(target_admin, full_post[x:x+4000], parse_mode="HTML")
+                    await self.bot.send_message(target_admin, "💬 <b>Действия со сводкой:</b>", parse_mode="HTML", reply_markup=kb)
                 else:
                     await self.bot.send_message(
-                        self.admin_id,
+                        target_admin,
                         full_post,
                         parse_mode="HTML",
                         reply_markup=kb,
@@ -73,14 +79,14 @@ class DigestScheduler:
                     )
             except TelegramBadRequest as e:
                 logger.warning(f"Telegram parse error in morning digest ({e}), sending plain text...")
-                await self.bot.send_message(self.admin_id, full_post, reply_markup=kb)
+                await self.bot.send_message(target_admin, full_post, reply_markup=kb)
 
             # 2. Отправляем полноценный .MD документ прямо в Telegram
             if md_path and os.path.exists(md_path):
                 today_str = datetime.now().strftime("%d.%m.%Y")
                 doc = FSInputFile(md_path, filename=f"Digest_{today_str}.md")
                 await self.bot.send_document(
-                    self.admin_id,
+                    target_admin,
                     document=doc,
                     caption="📑 <b>Полный аналитический отчет со всеми таблицами</b>\n<i>Нажмите на файл — откроется прямо внутри Telegram.</i>",
                     parse_mode="HTML"
