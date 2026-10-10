@@ -148,7 +148,12 @@ def get_delete_rss_keyboard(feeds: list) -> InlineKeyboardMarkup:
     buttons.append([InlineKeyboardButton(text="🔙 Назад к источникам", callback_data="btn_sources")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-def get_category_selection_keyboard(clean_username: str) -> InlineKeyboardMarkup:
+def get_category_selection_keyboard(clean_username: str, ai_category: str = "") -> InlineKeyboardMarkup:
+    buttons = []
+    if ai_category and ai_category.strip() and ai_category.strip() != "Общее и Новости":
+        clean_ai_label = ai_category.strip()[:28]
+        buttons.append([InlineKeyboardButton(text=f"🤖 Принять: {clean_ai_label}", callback_data=f"setchcat__{clean_username}__ai_detected")])
+
     categories = [
         ("🧠 Нейросети и ИИ", "ai"),
         ("🛠 DevOps & Self-Host", "devops"),
@@ -156,7 +161,6 @@ def get_category_selection_keyboard(clean_username: str) -> InlineKeyboardMarkup
         ("🎮 Hardware & GPU", "gpu"),
         ("🌐 Общее и Новости", "general")
     ]
-    buttons = []
     for label, slug in categories:
         cb = f"setchcat__{clean_username}__{slug}"
         buttons.append([InlineKeyboardButton(text=label, callback_data=cb)])

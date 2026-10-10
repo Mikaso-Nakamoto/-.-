@@ -152,51 +152,144 @@ def format_digest_to_collapsible_html(raw_text: str) -> str:
 
     return markdown_to_telegram_html(raw_text)
 
+def extract_clean_digest_post(raw_text: str, date_str: str) -> str:
+    """
+    Формирует лаконичный, аккуратный Telegram-пост из любого вывода LLM:
+    - Никаких служебных меток TELEGRAM_POST, FULL_REPORT, ===.
+    - Никаких сырых Markdown-таблиц внутри сообщения (они идут в .md файл).
+    - Каждая новость оформляется как <blockquote expandable><b>① Заголовок</b>\nСуть\n🔗 Ссылка</blockquote>
+    - В конце хэштеги.
+    """
+    if not raw_text:
+        return f"<b>⚡️ TECH & AI DIGEST — {date_str}</b>\n\nНет данных для отображения."
+
+    # Очистка от экранирования и артефактов
+    cleaned = raw_text.replace("&lt;", "<").replace("&gt;", ">")
+    cleaned = re.sub(r'={2,}\s*(?:TELEGRAM_POST|FULL_REPORT)\s*={2,}', '', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'(?m)^(?:TELEGRAM_POST|FULL_REPORT)\s*$', '', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'\([Лл]аконичный пост[^\)]*\)', '', cleaned)
+    cleaned = cleaned.strip()
+
+    header = f"<b>⚡️ TECH & AI DIGEST — {date_str}</b>"
+
+    # Поиск ссылок вида [1] https://...
+    footnote_links = {}
+    for m in re.finditer(r'\[(\d+)\]\s*(https?://[^\s\)]+)', cleaned):
+        footnote_links[int(m.group(1))] = m.group(2)
+
+    # Поиск строк таблицы
+    table_rows = []
+    for line in cleaned.split("\n"):
+        line = line.strip()
+        if not line.startswith("|") or not line.endswith("|"):
+            continue
+        cells = [c.strip() for c in line.strip("|").split("|")]
+        if len(cells) >= 3 and cells[0].isdigit():
+            num_idx = int(cells[0])
+            theme = cells[1]
+            body = cells[3] if len(cells) > 3 else (cells[2] if len(cells) > 2 else "")
+            link = ""
+            for c in cells:
+                m_url = re.search(r'https?://[^\s\)]+', c)
+                if m_url:
+                    link = m_url.group(0)
+                    break
+            if not link and num_idx in footnote_links:
+                link = footnote_links[num_idx]
+            table_rows.append((theme, body, link))
+
+    items = []
+
+    # 1. Поиск секции детального разбора
+    detail_match = re.search(r'##\s*🔍?\s*Детальный разбор(.*?)(?=\n##|\Z)', cleaned, flags=re.DOTALL | re.IGNORECASE)
+    target_text = detail_match.group(1) if detail_match else cleaned
+
+    section_pattern = r'(?m)^(?:###\s*|\d{1,2}[\.\)]\s*)(?:[0-9]{1,2}[\.\)]|[①-⑳])?\s*(?:[\*\_]{0,2})([^\n\*\_\|]{4,90})(?:[\*\_]{0,2})\s*\n'
+    parts = re.split(section_pattern, target_text)
+
+    if len(parts) >= 3:
+        num = 0
+        for i in range(1, len(parts), 2):
+            t_name = parts[i].strip()
+            t_body = parts[i+1].strip() if i+1 < len(parts) else ""
+            if len(t_name) < 3 or t_name.lower().startswith(("тема", "№", "категория", "сравнительная")):
+                continue
+            c_num = CIRCLED_NUMS[num] if num < len(CIRCLED_NUMS) else f"[{num+1}]"
+            num += 1
+
+            link_html = ""
+            m_l = re.search(r'\[([^\]]+)\]\((https?://[^\)]+)\)', t_body)
+            if m_l:
+                link_html = f'\n🔗 <a href="{m_l.group(2)}">{html.escape(m_l.group(1))}</a>'
+                t_body = re.sub(r'\[([^\]]+)\]\((https?://[^\)]+)\)', '', t_body)
+            elif num in footnote_links:
+                link_html = f'\n🔗 <a href="{footnote_links[num]}">Первоисточник</a>'
+
+            clean_lines = []
+            for bl in t_body.split("\n"):
+                bl = bl.strip()
+                if not bl or bl.startswith("|") or bl.startswith("#"):
+                    continue
+                bl = re.sub(r'^\s*[\*\-]\s*', '', bl)
+                bl = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', bl)
+                clean_lines.append(bl)
+
+            clean_body = " ".join(clean_lines[:2])[:250]
+            items.append(f"<blockquote expandable><b>{c_num} {html.escape(t_name)}</b>\n{clean_body}{link_html}</blockquote>")
+
+    # 2. Если секций нет, формируем из строк таблицы
+    if not items and table_rows:
+        for num, (theme, body, link) in enumerate(table_rows[:7]):
+            c_num = CIRCLED_NUMS[num] if num < len(CIRCLED_NUMS) else f"[{num+1}]"
+            link_html = f'\n🔗 <a href="{link}">Первоисточник</a>' if link else ""
+            clean_theme = html.escape(theme.replace("**", "").replace("*", "").strip())
+            clean_body = html.escape(body.replace("**", "").replace("*", "").strip())
+            items.append(f"<blockquote expandable><b>{c_num} {clean_theme}</b>\n{clean_body}{link_html}</blockquote>")
+
+    # 3. Если в тексте уже были блоки blockquote
+    if not items and "<blockquote" in cleaned:
+        for bq in re.findall(r'<blockquote[^>]*>(.*?)</blockquote>', cleaned, flags=re.DOTALL):
+            items.append(f"<blockquote expandable>{bq.strip()}</blockquote>")
+
+    lead = "Краткий обзор ключевых событий и трендов за прошедшие сутки:"
+
+    post_parts = [header, lead]
+    if items:
+        post_parts.extend(items)
+    else:
+        post_parts.append(html.escape(cleaned[:300]))
+
+    post_parts.append("#AI #Hardware #DevOps #TechNews")
+    return "\n\n".join(post_parts)
+
 DIGEST_SYSTEM_PROMPT = """Ты — персональный автономный ИИ-аналитик новостей и технологических трендов (2026 год).
-Твоя задача — формировать двухуровневую утреннюю выжимку по интересам пользователя:
-1) Лаконичный пост для Telegram с нативными сворачиваемыми блоками и фото.
-2) Полный детальный аналитический отчет в Markdown со сравнительной таблицей для открытия прямо в Telegram в виде отдельного документа.
+Твоя задача — формировать глубокий аналитический дайджест в формате Markdown.
 
-СТРОГАЯ СТРУКТУРА ОТВЕТА:
+СТРУКТУРА ОТВЕТА (MARKDOWN):
+# ⚡️ TECH & AI DIGEST — [Дата]
 
-=== TELEGRAM_POST ===
-<b>⚡️ TECH & AI DIGEST — [Дата]</b>
+[Краткое вводное резюме дня: 1-2 предложения о ключевом технологическом сдвиге за сутки]
 
-[Краткое вводное вступление: 1-2 предложения о ключевом тренде за сутки]
-
-<blockquote expandable><b>① [Заголовок первой новости]</b>
-[Емкая выжимка в 2-3 предложениях: конкретные факты, цифры, практический вывод и влияние на разработчика/пользователя].
-🔗 <a href="[URL]">[Источник]</a></blockquote>
-
-<blockquote expandable><b>② [Заголовок второй новости]</b>
-[Емкая выжимка: суть, цифры, выводы].
-🔗 <a href="[URL]">[Источник]</a></blockquote>
-
-[Повтори для 4-7 ключевых тем с номерами ③, ④, ⑤...]
-
-#[ТематическийХэштег] #AI #Hardware #SelfHosting
-
-=== FULL_REPORT ===
-# 📊 Полный аналитический дайджест технологий
-
-## 📋 Сравнительная сводка ключевых событий
+## 📋 Сравнительная таблица событий
 | № | Тема / Событие | Категория | Влияние / Значимость | Первоисточник |
 |---|----------------|-----------|----------------------|---------------|
-| 1 | ...            | ...       | ...                  | [Ссылка](url) |
+| 1 | ...            | ...       | ...                  | [Источник](url)|
 
 ## 🔍 Детальный технический разбор
-### 1. [Тема]
-- **Контекст и предыстория:** ...
-- **Технические нюансы и бенчмарки:** ...
-- **Практические последствия:** ...
-- **Ссылка:** [Оригинал](url)
+### 1. [Название темы]
+- **Суть:** [Что произошло, технические факты и цифры]
+- **Почему это важно:** [Технические последствия и практическая польза]
+- **Ссылка:** [Источник](url)
 
-## 💡 Архитектурные выводы дня
+### 2. [Название темы]
 ...
 
-ЖЕСТКИЕ ПРАВИЛА:
-1. В секции TELEGRAM_POST используй ТОЛЬКО HTML (<blockquote expandable>, <b>, <a href="...">). Никаких решеток ###!
-2. Никакого мусора: исключай рекламу, промокоды, кликбейт, розыгрыши.
+## 💡 Архитектурные выводы дня
+[Краткие выводы и практические рекомендации]
+
+ПРАВИЛА:
+1. Пиши емко, строго по фактам, без маркетинговой «воды».
+2. Исключай любую рекламу, партнерские промокоды, розыгрыши и крипто-скамы.
 3. Сохраняй реальные ссылки на первоисточники из предоставленных данных.
 """
 
@@ -211,9 +304,9 @@ def build_digest_user_prompt(
 
     pref_block = ""
     if learned_preferences:
-        pref_block = f"\nИСТОРИЯ РЕАКЦИЙ ПОЛЬЗОВАТЕЛЯ (Учти эти предпочтения при отборе):\n{learned_preferences}\n"
+        pref_block = f"\nИСТОРИЯ РЕАКЦИЙ ПОЛЬЗОВАТЕЛЯ:\n{learned_preferences}\n"
 
-    return f"""Сформируй утренний дайджест на основе следующих данных:
+    return f"""Сформируй утренний аналитический дайджест на основе следующих данных:
 
 ТЕМЫ ИНТЕРЕСА:
 {interests_str}
@@ -224,10 +317,5 @@ def build_digest_user_prompt(
 СЫРЫЕ ПУБЛИКАЦИИ:
 {raw_items_text}
 
-Сформируй ответ строго по разделам:
-=== TELEGRAM_POST ===
-(Лаконичный пост с <blockquote expandable><b>① ...</b></blockquote>)
-
-=== FULL_REPORT ===
-(Полный аналитический Markdown отчет с таблицей | № | Тема | Категория | ...)
+Сформируй Markdown-отчет со сравнительной таблицей и детальным разбором каждого события.
 """

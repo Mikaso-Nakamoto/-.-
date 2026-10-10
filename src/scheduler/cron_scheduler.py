@@ -75,10 +75,10 @@ class DigestScheduler:
                 logger.warning(f"Telegram parse error in morning digest ({e}), sending plain text...")
                 await self.bot.send_message(self.admin_id, full_post, reply_markup=kb)
 
-            # 2. Отправляем полноценный HTML-документ прямо в Telegram
-            if html_path and os.path.exists(html_path):
+            # 2. Отправляем полноценный .MD документ прямо в Telegram
+            if md_path and os.path.exists(md_path):
                 today_str = datetime.now().strftime("%d.%m.%Y")
-                doc = FSInputFile(html_path, filename=f"Digest_{today_str}.html")
+                doc = FSInputFile(md_path, filename=f"Digest_{today_str}.md")
                 await self.bot.send_document(
                     self.admin_id,
                     document=doc,

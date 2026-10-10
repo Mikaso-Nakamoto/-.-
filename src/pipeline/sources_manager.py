@@ -4,6 +4,9 @@ from pathlib import Path
 from typing import List, Dict, Any, Tuple
 import yaml
 
+from src.collectors.telegram_collector import TelegramWebCollector
+from src.collectors.rss_collector import RSSCollector
+
 logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
@@ -166,3 +169,97 @@ def remove_rss_feed(url_or_name: str) -> Tuple[bool, str]:
         return True, "RSS-лента успешно удалена!"
     else:
         return False, "Ошибка сохранения конфигурации."
+
+async def determine_channel_category_with_ai(username_or_url: str, router) -> str:
+    """
+    Анализирует последние публикации Telegram-канала через LLM и возвращает
+    точную категорию (включая возможность создания новой категории ИИ).
+    """
+    clean_user = clean_channel_username(username_or_url)
+    if not clean_user:
+        return "Общее и Новости"
+
+    items = []
+    try:
+        collector = TelegramWebCollector([{"username": clean_user}])
+        items = await collector.fetch_all(limit_per_channel=4)
+    except Exception as e:
+        logger.warning(f"Ошибка сбора постов для анализа канала @{clean_user}: {e}")
+
+    if not items:
+        return "Общее и Новости"
+
+    snippets = []
+    for it in items[:4]:
+        snippets.append(f"• {it.get('title', '')}\n{it.get('content', '')[:250]}")
+    post_samples = "\n---\n".join(snippets)
+
+    prompt = f"""Ты — классификатор контента.
+Твоя задача — проанализировать недавние публикации Telegram-канала '@{clean_user}' и определить одну точную, емкую тематическую категорию (2-4 слова на русском языке).
+
+Примеры стандартных категорий:
+- Нейросети и ИИ
+- DevOps & Self-Hosted
+- Разработка и Кодинг
+- Hardware & GPU
+- Кибербезопасность & SecOps
+
+ВАЖНО: Если контент канала посвящен другой теме, ты ОБЯЗАН создать НОВУЮ точную категорию (например: '3D-печать и DIY', 'GameDev & Unreal', 'Аниме & Мультипликация', 'Финансы и Крипта', 'Биотехнологии', 'Авто & Электрокары').
+
+ПУБЛИКАЦИИ КАНАЛА:
+{post_samples}
+
+ОТВЕТ: Напиши ТОЛЬКО название категории (2-4 слова), без лишних слов, без кавычек и точек.
+"""
+    try:
+        res = await router.generate_response(task="chat", user_prompt=prompt)
+        if res.get("success"):
+            line = res.get("content", "").strip().split("\n")[0].strip(' "\'«»`.*')
+            line = re.sub(r'^(?:категория|ответ|тема|category):\s*', '', line, flags=re.IGNORECASE).strip()
+            if 2 <= len(line) <= 40:
+                return line
+    except Exception as e:
+        logger.warning(f"Ошибка классификации канала через ИИ: {e}")
+
+    return "Общее и Новости"
+
+async def determine_rss_category_with_ai(url: str, router) -> str:
+    """
+    Анализирует статьи из RSS через LLM и возвращает категорию.
+    """
+    clean_url = url.strip()
+    items = []
+    try:
+        collector = RSSCollector([{"url": clean_url, "name": "feed"}])
+        items = await collector.fetch_all(limit_per_feed=4)
+    except Exception as e:
+        logger.warning(f"Ошибка сбора RSS для классификации: {e}")
+
+    if not items:
+        return "Общее и Новости"
+
+    snippets = []
+    for it in items[:4]:
+        snippets.append(f"• {it.get('title', '')}\n{it.get('content', '')[:250]}")
+    post_samples = "\n---\n".join(snippets)
+
+    prompt = f"""Ты — классификатор контента.
+Проанализируй заголовки статей из ленты '{clean_url}' и определи одну точную категорию (2-4 слова на русском языке).
+Ты МОЖЕШЬ придумать НОВУЮ категорию (например: 'Hardware & GPU', 'Нейросети и ИИ', 'DevOps & Linux', 'Наука и Космос').
+
+СТАТЬИ ЛЕНТЫ:
+{post_samples}
+
+ОТВЕТ: Напиши ТОЛЬКО название категории (2-4 слова).
+"""
+    try:
+        res = await router.generate_response(task="chat", user_prompt=prompt)
+        if res.get("success"):
+            line = res.get("content", "").strip().split("\n")[0].strip(' "\'«»`.*')
+            line = re.sub(r'^(?:категория|ответ|тема|category):\s*', '', line, flags=re.IGNORECASE).strip()
+            if 2 <= len(line) <= 40:
+                return line
+    except Exception as e:
+        logger.warning(f"Ошибка классификации RSS через ИИ: {e}")
+
+    return "Общее и Новости"

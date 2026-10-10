@@ -358,10 +358,10 @@ class DigestBuilder:
         raw_chunks = []
         for i, it in enumerate(items[:25], 1): # До 25 новостей в контекст
             raw_chunks.append(
-                f"[{i}] Источник: {it['channel']} ({it.get('category', 'Общее')})\n"
-                f"Заголовок: {it['title']}\n"
-                f"Текст: {it['content'][:400]}\n"
-                f"Ссылка: {it['url']}\n"
+                f"[{i}] Источник: {it.get('channel', 'Канал')} ({it.get('category', 'Общее')})\n"
+                f"Заголовок: {it.get('title', 'Новость')}\n"
+                f"Текст: {it.get('content', '')[:400]}\n"
+                f"Ссылка: {it.get('url', '')}\n"
             )
 
         raw_text = "\n---\n".join(raw_chunks)
@@ -395,23 +395,13 @@ class DigestBuilder:
         model = llm_res.get("model", "unknown")
         latency = llm_res.get("latency", 0.0)
 
-        # Разделяем ответ на краткий пост для Telegram и полный аналитический отчет
-        post_part = ""
-        report_part = ""
+        now_dt = datetime.now()
+        timestamp_str = now_dt.strftime("%Y-%m-%d_%H%M%S")
+        date_display = now_dt.strftime("%d.%m.%Y")
 
-        if "=== FULL_REPORT ===" in content:
-            parts = content.split("=== FULL_REPORT ===")
-            post_part = parts[0].replace("=== TELEGRAM_POST ===", "").strip()
-            report_part = parts[1].strip()
-        elif "=== TELEGRAM_POST ===" in content:
-            post_part = content.replace("=== TELEGRAM_POST ===", "").strip()
-            report_part = post_part
-        else:
-            post_part = content
-            report_part = content
-
-        # Преобразуем краткий пост в нативные блоки <blockquote expandable><b>① ...</b></blockquote>
-        telegram_post_html = format_digest_to_collapsible_html(post_part)
+        # 1. Извлекаем лаконичный Telegram-пост (без таблиц, без артефактов промпта, с нативными спойлерами)
+        from src.llm.prompts import extract_clean_digest_post
+        telegram_post_html = extract_clean_digest_post(content, date_display)
 
         # Добавляем футер с моделью и временем
         provider_footer = f"\n\n🤖 <b>{provider.upper()}</b> (<code>{model}</code>) • ⏱ {latency} сек."
@@ -419,23 +409,19 @@ class DigestBuilder:
             provider_footer += " <i>(резервный шлюз)</i>"
         telegram_post_html += provider_footer
 
-        # Генерируем полные файлы отчета (.md и .html)
-        now_dt = datetime.now()
-        timestamp_str = now_dt.strftime("%Y-%m-%d_%H%M%S")
-        date_display = now_dt.strftime("%d.%m.%Y")
-
-        md_filename = f"digest_{timestamp_str}.md"
-        html_filename = f"digest_{timestamp_str}.html"
+        # 2. Генерируем полные файлы отчета (.md и .html)
+        md_filename = f"Digest_{date_display.replace('.', '-')}_{timestamp_str}.md"
+        html_filename = f"Digest_{date_display.replace('.', '-')}_{timestamp_str}.html"
 
         md_path = self.digests_dir / md_filename
         html_path = self.digests_dir / html_filename
 
-        # Записываем Markdown отчет
-        md_path.write_text(report_part, encoding="utf-8")
+        # Записываем Markdown отчет со всеми таблицами и детальным анализом
+        md_path.write_text(content, encoding="utf-8")
 
-        # Записываем автономный HTML документ со стилями Antigravity
+        # Записываем автономный HTML документ для архива
         html_content = self._generate_standalone_html(
-            report_md=report_part,
+            report_md=content,
             date_str=date_display,
             provider=provider,
             model=model,
@@ -450,7 +436,7 @@ class DigestBuilder:
             provider=provider,
             model=model,
             post_html=telegram_post_html,
-            report_md=report_part,
+            report_md=content,
             report_html_path=str(html_path),
             report_md_path=str(md_path),
             lead_image_url=lead_image_url
@@ -462,7 +448,7 @@ class DigestBuilder:
             "success": True,
             "text": telegram_post_html,
             "telegram_post_html": telegram_post_html,
-            "full_report_md": report_part,
+            "full_report_md": content,
             "full_report_html_path": str(html_path),
             "full_report_md_path": str(md_path),
             "lead_image_url": lead_image_url,

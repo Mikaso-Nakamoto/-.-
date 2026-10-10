@@ -27,7 +27,9 @@ from src.pipeline.sources_manager import (
     get_rss_feeds,
     add_rss_feed,
     remove_rss_feed,
-    clean_channel_username
+    clean_channel_username,
+    determine_channel_category_with_ai,
+    determine_rss_category_with_ai
 )
 from src.bot.keyboards import (
     get_main_menu_keyboard,
@@ -300,13 +302,13 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
 
         await send_safe_reply(msg, post_html, reply_markup=kb, link_preview_options=preview_options)
 
-        # 2. Отправляем полноценный HTML-документ прямо в Telegram
-        if html_path and os.path.exists(html_path):
+        # 2. Отправляем полноценный .MD файл прямо в Telegram
+        if md_path and os.path.exists(md_path):
             today_str = datetime.now().strftime("%d.%m.%Y")
-            doc = FSInputFile(html_path, filename=f"Digest_{today_str}.html")
+            doc = FSInputFile(md_path, filename=f"Digest_{today_str}.md")
             await msg.answer_document(
                 document=doc,
-                caption="📑 <b>Полный аналитический отчет со всеми таблицами</b>\n<i>Нажмите на файл — откроется прямо внутри Telegram.</i>",
+                caption="📑 <b>Полный аналитический отчет со всеми таблицами</b>\n<i>Нажмите на файл — откроется прямо в Telegram со всеми деталями.</i>",
                 parse_mode="HTML"
             )
 
@@ -434,16 +436,24 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
             )
             return
 
-        await state.clear()
+        status_msg = await send_safe_reply(msg, f"⏳ <i>Анализирую канал @{clean_user} и его последние посты через ИИ...</i>")
+        ai_cat = await determine_channel_category_with_ai(clean_user, llm_router)
+        try:
+            await status_msg.delete()
+        except Exception:
+            pass
+
+        await state.update_data(clean_username=clean_user, ai_category=ai_cat)
         text = (
-            f"✅ Канал <b>@{clean_user}</b> распознан!\n\n"
-            f"Выберите тематическую категорию для публикаций этого канала:"
+            f"📢 Канал <b>@{clean_user}</b> распознан!\n\n"
+            f"🤖 <i>ИИ определил категорию по недавним публикациям:</i>\n"
+            f"👉 «<b>{ai_cat}</b>»\n\n"
+            f"Подтвердите категорию или выберите другую:"
         )
-        await send_safe_reply(msg, text, reply_markup=get_category_selection_keyboard(clean_user))
+        await send_safe_reply(msg, text, reply_markup=get_category_selection_keyboard(clean_user, ai_cat))
 
     @r.callback_query(F.data.startswith("setchcat__"))
     async def on_channel_category_selected(call: CallbackQuery, state: FSMContext):
-        await state.clear()
         parts = call.data.split("__")
         if len(parts) < 3:
             await call.answer("Ошибка параметров", show_alert=True)
@@ -451,13 +461,21 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
 
         username = parts[1]
         cat_slug = parts[2]
-        cat_title = CATEGORIES_MAP.get(cat_slug, "Общее и Новости")
+
+        state_data = await state.get_data()
+        await state.clear()
+
+        if cat_slug == "ai_detected":
+            cat_title = state_data.get("ai_category", "Общее и Новости")
+        else:
+            cat_title = CATEGORIES_MAP.get(cat_slug, "Общее и Новости")
 
         success, result_msg = add_telegram_channel(username, cat_title)
         await call.answer("Канал добавлен!" if success else "Внимание", show_alert=not success)
 
         text = (
             f"{'🎉' if success else '⚠️'} {result_msg}\n\n"
+            f"🏷 Категория: «<b>{cat_title}</b>»\n"
             f"Теперь публикации из <b>@{username}</b> будут анализироваться для утренней сводки и Discover-ленты."
         )
         await safe_edit_text(call, text, get_sources_menu_keyboard())
@@ -511,11 +529,18 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
             await send_safe_reply(msg, "❌ Добавление RSS отменено.", reply_markup=get_sources_menu_keyboard())
             return
 
-        success, result_msg = add_rss_feed(raw_url)
+        status_msg = await send_safe_reply(msg, "⏳ <i>Анализирую RSS-поток через ИИ...</i>")
+        ai_cat = await determine_rss_category_with_ai(raw_url, llm_router)
+        try:
+            await status_msg.delete()
+        except Exception:
+            pass
+
         await state.clear()
+        success, result_msg = add_rss_feed(raw_url, category=ai_cat)
         await send_safe_reply(
             msg,
-            f"{'🎉' if success else '⚠️'} {result_msg}",
+            f"{'🎉' if success else '⚠️'} {result_msg}\n\n🤖 <i>Определена категория:</i> «<b>{ai_cat}</b>»",
             reply_markup=get_sources_menu_keyboard()
         )
 
@@ -551,7 +576,7 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
             text = "✅ Все RSS-ленты удалены."
             await safe_edit_text(call, text, get_sources_menu_keyboard())
 
-    # 4. Быстрые команды для прямого добавления/удаления каналов
+    # 4. Быстрые команды для прямого добавления/удаления каналов и RSS
     @r.message(Command("addchannel"))
     async def cmd_quick_addchannel(msg: Message):
         if not is_admin(msg.from_user.id):
@@ -564,16 +589,29 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
                 "ℹ️ <b>Использование команды:</b>\n"
                 "<code>/addchannel @username [Категория]</code>\n\n"
                 "<i>Примеры:</i>\n"
-                "• <code>/addchannel @neuralmeduza Нейросети и ИИ</code>\n"
-                "• <code>/addchannel @habr_com DevOps</code>\n"
+                "• <code>/addchannel @neuralmeduza</code> (ИИ автоматически определит категорию!)\n"
+                "• <code>/addchannel @habr_com DevOps & Linux</code>\n"
                 "• <code>/addchannel https://t.me/ai_newz</code>"
             )
             return
 
         username = parts[1]
-        category = parts[2] if len(parts) > 2 else "Общее и Новости"
+        if len(parts) > 2:
+            category = parts[2]
+        else:
+            status_msg = await send_safe_reply(msg, f"⏳ <i>Анализирую канал {username} через ИИ...</i>")
+            category = await determine_channel_category_with_ai(username, llm_router)
+            try:
+                await status_msg.delete()
+            except Exception:
+                pass
+
         success, result_msg = add_telegram_channel(username, category)
-        await send_safe_reply(msg, f"{'🎉' if success else '⚠️'} {result_msg}", reply_markup=get_sources_menu_keyboard())
+        await send_safe_reply(
+            msg,
+            f"{'🎉' if success else '⚠️'} {result_msg}\n\n🤖 <i>Категория:</i> «<b>{category}</b>»",
+            reply_markup=get_sources_menu_keyboard()
+        )
 
     @r.message(Command("delchannel"))
     async def cmd_quick_delchannel(msg: Message):
@@ -587,6 +625,55 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
 
         username = parts[1]
         success, result_msg = remove_telegram_channel(username)
+        await send_safe_reply(msg, f"{'🗑' if success else '⚠️'} {result_msg}", reply_markup=get_sources_menu_keyboard())
+
+    @r.message(Command("addrss"))
+    async def cmd_quick_addrss(msg: Message):
+        if not is_admin(msg.from_user.id):
+            return
+
+        parts = msg.text.strip().split(maxsplit=2)
+        if len(parts) < 2:
+            await send_safe_reply(
+                msg,
+                "ℹ️ <b>Использование команды:</b>\n"
+                "<code>/addrss &lt;URL&gt; [Категория]</code>\n\n"
+                "<i>Примеры:</i>\n"
+                "• <code>/addrss https://3dnews.ru/news/rss/</code> (ИИ определит категорию автоматически)\n"
+                "• <code>/addrss https://habr.com/ru/rss/hubs/all/ Hardware</code>"
+            )
+            return
+
+        url = parts[1]
+        if len(parts) > 2:
+            category = parts[2]
+        else:
+            status_msg = await send_safe_reply(msg, f"⏳ <i>Анализирую RSS-поток через ИИ...</i>")
+            category = await determine_rss_category_with_ai(url, llm_router)
+            try:
+                await status_msg.delete()
+            except Exception:
+                pass
+
+        success, result_msg = add_rss_feed(url, category=category)
+        await send_safe_reply(
+            msg,
+            f"{'🎉' if success else '⚠️'} {result_msg}\n\n🤖 <i>Категория:</i> «<b>{category}</b>»",
+            reply_markup=get_sources_menu_keyboard()
+        )
+
+    @r.message(Command("delrss"))
+    async def cmd_quick_delrss(msg: Message):
+        if not is_admin(msg.from_user.id):
+            return
+
+        parts = msg.text.strip().split()
+        if len(parts) < 2:
+            await send_safe_reply(msg, "ℹ️ <b>Использование:</b> <code>/delrss &lt;URL&gt;</code>")
+            return
+
+        url = parts[1]
+        success, result_msg = remove_rss_feed(url)
         await send_safe_reply(msg, f"{'🗑' if success else '⚠️'} {result_msg}", reply_markup=get_sources_menu_keyboard())
 
     # --------------------------------------------------------------------------
