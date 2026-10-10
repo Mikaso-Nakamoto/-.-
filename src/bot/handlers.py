@@ -1,9 +1,12 @@
 import logging
 import os
+import re
 from pathlib import Path
 from datetime import datetime
 from aiogram import Router, F
 from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
     Message,
     CallbackQuery,
@@ -17,17 +20,42 @@ from src.llm.router import LLMRouter
 from src.llm.prompts import markdown_to_telegram_html
 from src.pipeline.digest_builder import DigestBuilder
 from src.pipeline.storage import Storage
+from src.pipeline.sources_manager import (
+    get_telegram_channels,
+    add_telegram_channel,
+    remove_telegram_channel,
+    get_rss_feeds,
+    add_rss_feed,
+    remove_rss_feed,
+    clean_channel_username
+)
 from src.bot.keyboards import (
     get_main_menu_keyboard,
     get_chat_control_keyboard,
     get_digest_feedback_keyboard,
     get_provider_selection_keyboard,
     get_models_keyboard,
-    get_provider_browser_keyboard
+    get_provider_browser_keyboard,
+    get_sources_menu_keyboard,
+    get_delete_channels_keyboard,
+    get_delete_rss_keyboard,
+    get_category_selection_keyboard,
+    get_cancel_keyboard
 )
-from src.config import load_sources
 
 logger = logging.getLogger(__name__)
+
+class SourceStates(StatesGroup):
+    waiting_for_channel = State()
+    waiting_for_rss_url = State()
+
+CATEGORIES_MAP = {
+    "ai": "Нейросети и ИИ",
+    "devops": "DevOps & Self-Hosted",
+    "dev": "Разработка и Кодинг",
+    "gpu": "Hardware & GPU",
+    "general": "Общее и Новости"
+}
 
 def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: Storage, admin_id: int, scheduler=None) -> Router:
     r = Router()
@@ -86,11 +114,12 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
     # Главное меню (Команда /start или кнопка "Главное меню")
     # --------------------------------------------------------------------------
     @r.message(Command("start"))
-    async def cmd_start_msg(msg: Message):
+    async def cmd_start_msg(msg: Message, state: FSMContext):
         if not is_admin(msg.from_user.id):
             await msg.answer("⛔️ Доступ ограничен.")
             return
 
+        await state.clear()
         is_local_on = await llm_router.check_local_health()
         local_status = "🟢 В сети (LM Studio)" if is_local_on else "🔴 Офлайн (Включен облачный резерв)"
 
@@ -114,8 +143,9 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
         await send_safe_reply(msg, text, reply_markup=get_main_menu_keyboard(chat_active, get_web_app_url()))
 
     @r.callback_query(F.data == "btn_menu")
-    async def cb_main_menu(call: CallbackQuery):
+    async def cb_main_menu(call: CallbackQuery, state: FSMContext):
         await call.answer()
+        await state.clear()
         is_local_on = await llm_router.check_local_health()
         local_status = "🟢 В сети (LM Studio)" if is_local_on else "🔴 Офлайн"
         active_prov = llm_router.active_provider
@@ -136,7 +166,8 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
     # --------------------------------------------------------------------------
     @r.message(Command("chat"))
     @r.callback_query(F.data == "btn_chat_start")
-    async def cmd_chat_start(event: Message | CallbackQuery):
+    async def cmd_chat_start(event: Message | CallbackQuery, state: FSMContext):
+        await state.clear()
         storage.set_chat_mode(True)
         active_prov = llm_router.active_provider
         active_model = llm_router.get_current_model_for_provider(active_prov if active_prov != "auto" else "openrouter")
@@ -156,7 +187,8 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
 
     @r.message(Command("exit"))
     @r.callback_query(F.data == "btn_chat_stop")
-    async def cmd_chat_stop(event: Message | CallbackQuery):
+    async def cmd_chat_stop(event: Message | CallbackQuery, state: FSMContext):
+        await state.clear()
         storage.set_chat_mode(False)
         text = (
             f"🔴 *Режим диалога завершен.*\n\n"
@@ -268,6 +300,234 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
         logger.info(f"Зафиксирована нативная реакция пользователя: {emoji}")
 
     # --------------------------------------------------------------------------
+    # Управление источниками новостей (Telegram каналы и RSS)
+    # --------------------------------------------------------------------------
+    @r.message(Command("sources"))
+    @r.callback_query(F.data == "btn_sources")
+    async def cmd_sources(event: Message | CallbackQuery, state: FSMContext):
+        await state.clear()
+        tg_channels = get_telegram_channels()
+        rss_feeds = get_rss_feeds()
+
+        tg_lines = []
+        for i, c in enumerate(tg_channels, 1):
+            tg_lines.append(f"{i}. <a href=\"https://t.me/{c['username']}\">@{c['username']}</a> <i>({c.get('category', 'Общее')})</i>")
+        tg_list = "\n".join(tg_lines) or "<i>(нет подключенных каналов)</i>"
+
+        rss_lines = []
+        for i, r in enumerate(rss_feeds, 1):
+            rss_lines.append(f"{i}. <b>{r.get('name', 'RSS')}</b> <i>({r.get('category', 'Общее')})</i>\n   <code>{r.get('url')}</code>")
+        rss_list = "\n".join(rss_lines) or "<i>(нет подключенных RSS)</i>"
+
+        text = (
+            f"📡 <b>Управление источниками новостей:</b>\n\n"
+            f"📢 <b>Подключенные Telegram-каналы ({len(tg_channels)}):</b>\n{tg_list}\n\n"
+            f"📰 <b>RSS-ленты ({len(rss_feeds)}):</b>\n{rss_list}\n\n"
+            f"<i>Вы можете добавлять каналы и RSS через кнопки ниже или командами:</i>\n"
+            f"• <code>/addchannel @username [категория]</code>\n"
+            f"• <code>/delchannel @username</code>"
+        )
+
+        kb = get_sources_menu_keyboard()
+        if isinstance(event, CallbackQuery):
+            await event.answer()
+            await safe_edit_text(event, text, kb)
+        else:
+            await send_safe_reply(event, text, reply_markup=kb)
+
+    # 1. Добавление Telegram-канала через кнопку
+    @r.callback_query(F.data == "btn_add_channel")
+    async def cb_add_channel(call: CallbackQuery, state: FSMContext):
+        await call.answer()
+        await state.set_state(SourceStates.waiting_for_channel)
+        text = (
+            "📢 <b>Добавление Telegram-канала</b>\n\n"
+            "Отправьте в чат <b>@юзернейм</b> канала или ссылку на него.\n\n"
+            "<i>Примеры:</i>\n"
+            "• <code>@neuralmeduza</code>\n"
+            "• <code>https://t.me/ai_newz</code>\n"
+            "• <code>habr_com</code>\n\n"
+            "<i>Канал должен быть публичным (с открытым веб-просмотром t.me/s/...).</i>"
+        )
+        await safe_edit_text(call, text, get_cancel_keyboard("btn_sources"))
+
+    @r.message(SourceStates.waiting_for_channel)
+    async def on_input_channel(msg: Message, state: FSMContext):
+        if not is_admin(msg.from_user.id):
+            return
+
+        raw_input = msg.text.strip()
+        if raw_input.startswith("/cancel"):
+            await state.clear()
+            await send_safe_reply(msg, "❌ Добавление канала отменено.", reply_markup=get_sources_menu_keyboard())
+            return
+
+        clean_user = clean_channel_username(raw_input)
+        if not clean_user or not re.match(r'^[a-zA-Z0-9_]{3,35}$', clean_user):
+            await send_safe_reply(
+                msg,
+                "❌ Некорректный юзернейм канала. Допустимы только буквы A-Z, цифры и _ (например, <code>@ai_newz</code>).\n"
+                "Попробуйте еще раз или нажмите отмену:",
+                reply_markup=get_cancel_keyboard("btn_sources")
+            )
+            return
+
+        await state.clear()
+        text = (
+            f"✅ Канал <b>@{clean_user}</b> распознан!\n\n"
+            f"Выберите тематическую категорию для публикаций этого канала:"
+        )
+        await send_safe_reply(msg, text, reply_markup=get_category_selection_keyboard(clean_user))
+
+    @r.callback_query(F.data.startswith("setchcat__"))
+    async def on_channel_category_selected(call: CallbackQuery, state: FSMContext):
+        await state.clear()
+        parts = call.data.split("__")
+        if len(parts) < 3:
+            await call.answer("Ошибка параметров", show_alert=True)
+            return
+
+        username = parts[1]
+        cat_slug = parts[2]
+        cat_title = CATEGORIES_MAP.get(cat_slug, "Общее и Новости")
+
+        success, result_msg = add_telegram_channel(username, cat_title)
+        await call.answer("Канал добавлен!" if success else "Внимание", show_alert=not success)
+
+        text = (
+            f"{'🎉' if success else '⚠️'} {result_msg}\n\n"
+            f"Теперь публикации из <b>@{username}</b> будут анализироваться для утренней сводки и Discover-ленты."
+        )
+        await safe_edit_text(call, text, get_sources_menu_keyboard())
+
+    # 2. Удаление Telegram-канала через кнопку
+    @r.callback_query(F.data == "btn_del_channel_menu")
+    async def cb_del_channel_menu(call: CallbackQuery):
+        await call.answer()
+        channels = get_telegram_channels()
+        if not channels:
+            await call.answer("Список каналов пуст", show_alert=True)
+            return
+
+        text = "🗑 <b>Выберите Telegram-канал для удаления из источников:</b>"
+        await safe_edit_text(call, text, get_delete_channels_keyboard(channels))
+
+    @r.callback_query(F.data.startswith("delch__"))
+    async def on_delete_channel(call: CallbackQuery):
+        username = call.data.replace("delch__", "")
+        success, result_msg = remove_telegram_channel(username)
+        await call.answer(f"Канал @{username} удален!" if success else "Ошибка", show_alert=True)
+
+        channels = get_telegram_channels()
+        if channels:
+            text = f"🗑 Канал <b>@{username}</b> удален.\n\nВыберите еще канал для удаления или вернитесь назад:"
+            await safe_edit_text(call, text, get_delete_channels_keyboard(channels))
+        else:
+            text = "✅ Все Telegram-каналы удалены из списка источников."
+            await safe_edit_text(call, text, get_sources_menu_keyboard())
+
+    # 3. Добавление и удаление RSS
+    @r.callback_query(F.data == "btn_add_rss")
+    async def cb_add_rss(call: CallbackQuery, state: FSMContext):
+        await call.answer()
+        await state.set_state(SourceStates.waiting_for_rss_url)
+        text = (
+            "📰 <b>Добавление RSS-ленты</b>\n\n"
+            "Отправьте в чат URL-адрес RSS потока.\n\n"
+            "<i>Пример:</i> <code>https://3dnews.ru/news/rss/</code>"
+        )
+        await safe_edit_text(call, text, get_cancel_keyboard("btn_sources"))
+
+    @r.message(SourceStates.waiting_for_rss_url)
+    async def on_input_rss(msg: Message, state: FSMContext):
+        if not is_admin(msg.from_user.id):
+            return
+
+        raw_url = msg.text.strip()
+        if raw_url.startswith("/cancel"):
+            await state.clear()
+            await send_safe_reply(msg, "❌ Добавление RSS отменено.", reply_markup=get_sources_menu_keyboard())
+            return
+
+        success, result_msg = add_rss_feed(raw_url)
+        await state.clear()
+        await send_safe_reply(
+            msg,
+            f"{'🎉' if success else '⚠️'} {result_msg}",
+            reply_markup=get_sources_menu_keyboard()
+        )
+
+    @r.callback_query(F.data == "btn_del_rss_menu")
+    async def cb_del_rss_menu(call: CallbackQuery):
+        await call.answer()
+        feeds = get_rss_feeds()
+        if not feeds:
+            await call.answer("Список RSS пуст", show_alert=True)
+            return
+
+        text = "🗑 <b>Выберите RSS-ленту для удаления:</b>"
+        await safe_edit_text(call, text, get_delete_rss_keyboard(feeds))
+
+    @r.callback_query(F.data.startswith("delrss__"))
+    async def on_delete_rss(call: CallbackQuery):
+        idx_str = call.data.replace("delrss__", "")
+        feeds = get_rss_feeds()
+        try:
+            idx = int(idx_str)
+            if 0 <= idx < len(feeds):
+                target_url = feeds[idx]["url"]
+                remove_rss_feed(target_url)
+                await call.answer("RSS-лента удалена!", show_alert=True)
+        except Exception as e:
+            logger.error(f"Error removing RSS: {e}")
+
+        remaining = get_rss_feeds()
+        if remaining:
+            text = "🗑 RSS-лента удалена.\n\nВыберите еще одну или вернитесь назад:"
+            await safe_edit_text(call, text, get_delete_rss_keyboard(remaining))
+        else:
+            text = "✅ Все RSS-ленты удалены."
+            await safe_edit_text(call, text, get_sources_menu_keyboard())
+
+    # 4. Быстрые команды для прямого добавления/удаления каналов
+    @r.message(Command("addchannel"))
+    async def cmd_quick_addchannel(msg: Message):
+        if not is_admin(msg.from_user.id):
+            return
+
+        parts = msg.text.strip().split(maxsplit=2)
+        if len(parts) < 2:
+            await send_safe_reply(
+                msg,
+                "ℹ️ <b>Использование команды:</b>\n"
+                "<code>/addchannel @username [Категория]</code>\n\n"
+                "<i>Примеры:</i>\n"
+                "• <code>/addchannel @neuralmeduza Нейросети и ИИ</code>\n"
+                "• <code>/addchannel @habr_com DevOps</code>\n"
+                "• <code>/addchannel https://t.me/ai_newz</code>"
+            )
+            return
+
+        username = parts[1]
+        category = parts[2] if len(parts) > 2 else "Общее и Новости"
+        success, result_msg = add_telegram_channel(username, category)
+        await send_safe_reply(msg, f"{'🎉' if success else '⚠️'} {result_msg}", reply_markup=get_sources_menu_keyboard())
+
+    @r.message(Command("delchannel"))
+    async def cmd_quick_delchannel(msg: Message):
+        if not is_admin(msg.from_user.id):
+            return
+
+        parts = msg.text.strip().split()
+        if len(parts) < 2:
+            await send_safe_reply(msg, "ℹ️ <b>Использование:</b> <code>/delchannel @username</code>")
+            return
+
+        username = parts[1]
+        success, result_msg = remove_telegram_channel(username)
+        await send_safe_reply(msg, f"{'🗑' if success else '⚠️'} {result_msg}", reply_markup=get_sources_menu_keyboard())
+
+    # --------------------------------------------------------------------------
     # Выбор провайдеров и моделей (редактирование на месте)
     # --------------------------------------------------------------------------
     @r.message(Command("model"))
@@ -320,7 +580,7 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
         await safe_edit_text(call, f"✅ *Для {prov.upper()} активна модель:*\n`{model_id}`", kb)
 
     # --------------------------------------------------------------------------
-    # Статус системы и источники (Редактирование на месте)
+    # Статус системы (Редактирование на месте)
     # --------------------------------------------------------------------------
     @r.message(Command("status"))
     @r.callback_query(F.data == "btn_status")
@@ -343,28 +603,6 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
             f"   - Google Gemini: {'🟢 Подключен' if llm_router.config.gemini.api_key else '⚪️ Нет ключа'}\n"
             f"   - OpenRouter (~25 free моделей): {'🟢 Подключен' if llm_router.config.openrouter.api_key else '⚪️ Нет ключа'}\n\n"
             f"Текущий режим: *{llm_router.active_provider.upper()}*"
-        )
-        if isinstance(event, CallbackQuery):
-            await event.answer()
-            await safe_edit_text(event, text, get_main_menu_keyboard(storage.is_chat_mode_active(), get_web_app_url()))
-        else:
-            await send_safe_reply(event, text, reply_markup=get_main_menu_keyboard(storage.is_chat_mode_active(), get_web_app_url()))
-
-    @r.message(Command("sources"))
-    @r.callback_query(F.data == "btn_sources")
-    async def cmd_sources(event: Message | CallbackQuery):
-        sources = load_sources().get("sources", {})
-        tg = sources.get("telegram_channels", [])
-        rss = sources.get("rss_feeds", [])
-
-        tg_list = "\n".join([f"• @{c.get('username')} _({c.get('category')})_" for c in tg]) or "Нет"
-        rss_list = "\n".join([f"• {r.get('name', r.get('url'))} _({r.get('category')})_" for r in rss]) or "Нет"
-
-        text = (
-            f"📡 *Подключенные источники для дайджеста:*\n\n"
-            f"📢 *Telegram-каналы:*\n{tg_list}\n\n"
-            f"📰 *RSS-ленты:*\n{rss_list}\n\n"
-            f"_Чтобы добавить канал, просто впишите его в config/sources.yaml на сервере._"
         )
         if isinstance(event, CallbackQuery):
             await event.answer()
@@ -413,7 +651,7 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
         if not is_admin(msg.from_user.id):
             return
 
-        # Если режим чата выключен — вежливо подсказываем, как его включить
+        # Если режим чата выключен — подсказываем, как включить
         if not storage.is_chat_mode_active():
             text = (
                 f"💡 *Режим диалога сейчас выключен.*\n\n"

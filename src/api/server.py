@@ -136,7 +136,36 @@ def create_app(storage: Storage, router: LLMRouter, digest_builder: DigestBuilde
         return {"success": True, "message": "Реакция учтена в предпочтениях"}
 
     # --------------------------------------------------------------------------
-    # 6. Статус узлов и модели
+    # 6. Управление источниками новостей (Telegram каналы и RSS)
+    # --------------------------------------------------------------------------
+    @app.get("/api/sources")
+    async def get_all_sources():
+        from src.pipeline.sources_manager import get_telegram_channels, get_rss_feeds
+        return {
+            "telegram_channels": get_telegram_channels(),
+            "rss_feeds": get_rss_feeds()
+        }
+
+    @app.post("/api/sources/channel")
+    async def api_add_channel(payload: Dict[str, str]):
+        from src.pipeline.sources_manager import add_telegram_channel
+        username = payload.get("username", "")
+        category = payload.get("category", "Общее и Новости")
+        ok, msg = add_telegram_channel(username, category)
+        if not ok:
+            raise HTTPException(status_code=400, detail=msg)
+        return {"success": True, "message": msg}
+
+    @app.delete("/api/sources/channel/{username}")
+    async def api_delete_channel(username: str):
+        from src.pipeline.sources_manager import remove_telegram_channel
+        ok, msg = remove_telegram_channel(username)
+        if not ok:
+            raise HTTPException(status_code=404, detail=msg)
+        return {"success": True, "message": msg}
+
+    # --------------------------------------------------------------------------
+    # 7. Статус узлов и модели
     # --------------------------------------------------------------------------
     @app.get("/api/status")
     async def get_system_status():
@@ -149,7 +178,7 @@ def create_app(storage: Storage, router: LLMRouter, digest_builder: DigestBuilde
         }
 
     # --------------------------------------------------------------------------
-    # 7. Раздача мобильного PWA интерфейса
+    # 8. Раздача мобильного PWA интерфейса
     # --------------------------------------------------------------------------
     if static_dir.exists():
         app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")

@@ -1,0 +1,22 @@
+sources:
+  telegram_channels:
+  - username: neuralmeduza
+    category: Нейросети и ИИ
+  - username: ai_newz
+    category: Нейросети и ИИ
+  - username: habr_com
+    category: DevOps & Self-Hosted
+  - username: exploitex
+    category: DevOps & Self-Hosted
+  - username: proglib
+    category: Разработка и GameDev
+  rss_feeds:
+  - url: https://habr.com/ru/rss/hubs/artificial_intelligence/all/
+    category: Нейросети и ИИ
+    name: Habr AI
+  - url: https://habr.com/ru/rss/hubs/linux/all/
+    category: DevOps & Self-Hosted
+    name: Habr Linux
+  - url: https://3dnews.ru/news/rss/
+    category: Hardware & GPU
+    name: 3DNews

@@ -104,3 +104,59 @@ def get_provider_browser_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="🌐 Модели Google Gemini", callback_data="viewmods_gemini")],
         [InlineKeyboardButton(text="🔙 Главное меню", callback_data="btn_menu")]
     ])
+
+def get_sources_menu_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="➕ Добавить TG-канал", callback_data="btn_add_channel"),
+            InlineKeyboardButton(text="🗑 Удалить канал", callback_data="btn_del_channel_menu")
+        ],
+        [
+            InlineKeyboardButton(text="➕ Добавить RSS", callback_data="btn_add_rss"),
+            InlineKeyboardButton(text="🗑 Удалить RSS", callback_data="btn_del_rss_menu")
+        ],
+        [
+            InlineKeyboardButton(text="🏠 Главное меню", callback_data="btn_menu")
+        ]
+    ])
+
+def get_delete_channels_keyboard(channels: list) -> InlineKeyboardMarkup:
+    buttons = []
+    for ch in channels:
+        user = ch.get("username", "")
+        cat = ch.get("category", "")
+        label = f"❌ @{user}" + (f" ({cat[:14]})" if cat else "")
+        buttons.append([InlineKeyboardButton(text=label, callback_data=f"delch__{user}")])
+
+    buttons.append([InlineKeyboardButton(text="🔙 Назад к источникам", callback_data="btn_sources")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def get_delete_rss_keyboard(feeds: list) -> InlineKeyboardMarkup:
+    buttons = []
+    for i, feed in enumerate(feeds):
+        name = feed.get("name") or feed.get("url", "")
+        buttons.append([InlineKeyboardButton(text=f"❌ {name[:28]}", callback_data=f"delrss__{i}")])
+
+    buttons.append([InlineKeyboardButton(text="🔙 Назад к источникам", callback_data="btn_sources")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def get_category_selection_keyboard(clean_username: str) -> InlineKeyboardMarkup:
+    categories = [
+        ("🧠 Нейросети и ИИ", "ai"),
+        ("🛠 DevOps & Self-Host", "devops"),
+        ("💻 Разработка и Кодинг", "dev"),
+        ("🎮 Hardware & GPU", "gpu"),
+        ("🌐 Общее и Новости", "general")
+    ]
+    buttons = []
+    for label, slug in categories:
+        cb = f"setchcat__{clean_username}__{slug}"
+        buttons.append([InlineKeyboardButton(text=label, callback_data=cb)])
+
+    buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="btn_sources")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def get_cancel_keyboard(callback_data: str = "btn_sources") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="❌ Отмена", callback_data=callback_data)]
+    ])
