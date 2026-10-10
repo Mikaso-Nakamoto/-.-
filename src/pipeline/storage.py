@@ -141,6 +141,15 @@ class Storage:
                     it.get("published_at", "")
                 ))
 
+    def purge_all_news_and_digests(self):
+        """Полная зачистка старых новостей, хэшей и архивов дайджестов для чистого старта"""
+        with self._get_connection() as conn:
+            conn.execute("DELETE FROM seen_items")
+            conn.execute("DELETE FROM news_feed")
+            conn.execute("DELETE FROM full_digests")
+            conn.execute("DELETE FROM digest_history")
+            conn.execute("DELETE FROM chat_history")
+
     def get_news_feed(self, limit: int = 40) -> List[Dict[str, Any]]:
         with self._get_connection() as conn:
             cur = conn.execute(

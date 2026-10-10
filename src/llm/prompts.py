@@ -298,8 +298,8 @@ def extract_clean_digest_post(raw_text: str, date_str: str) -> str:
             # Сохраняем 2-4 конкретных содержательных пункта (Тезис, Важность, Детали)
             body_bullets = "\n".join(lines[:4]) if lines else "• <b>Суть:</b> Подробности события опубликованы в источнике."
 
-            # Гарантируем, что в блоке от 4 строк для срабатывания нативного шеврона ∨ в Telegram Desktop
-            block = f"<blockquote expandable><b>{c_num} {full_title}</b>\n{body_bullets}{link_html}</blockquote>"
+            # Формируем чистую текстовую карточку новости (без цитат и без полос)
+            block = f"<b>{c_num} {full_title}</b>\n{body_bullets}{link_html}"
             items.append(block)
 
     # 2. Если секций нет, формируем из строк таблицы с плотной структурой
@@ -312,15 +312,17 @@ def extract_clean_digest_post(raw_text: str, date_str: str) -> str:
             clean_cat = html.escape(cat.replace("**", "").replace("*", "").strip())
 
             items.append(
-                f"<blockquote expandable><b>{c_num} {clean_cat}: {clean_theme}</b>\n"
+                f"<b>{c_num} {clean_cat}: {clean_theme}</b>\n"
                 f"• <b>Факты:</b> {clean_body}\n"
-                f"• <b>Значимость:</b> Важное технологическое событие в категории «{clean_cat}».{link_html}</blockquote>"
+                f"• <b>Значимость:</b> Важное событие в категории «{clean_cat}».{link_html}"
             )
 
-    # 3. Если в тексте уже были блоки blockquote
+    # 3. Если в тексте присутствовали теги blockquote — полностью удаляем их
     if not items and "<blockquote" in cleaned:
         for bq in re.findall(r'<blockquote[^>]*>(.*?)</blockquote>', cleaned, flags=re.DOTALL):
-            items.append(f"<blockquote expandable>{bq.strip()}</blockquote>")
+            clean_bq = re.sub(r'</?blockquote[^>]*>', '', bq).strip()
+            if clean_bq:
+                items.append(clean_bq)
 
     lead = "Краткий обзор ключевых событий и трендов за прошедшие сутки:"
 
@@ -330,7 +332,7 @@ def extract_clean_digest_post(raw_text: str, date_str: str) -> str:
     else:
         post_parts.append(html.escape(cleaned[:300]))
 
-    post_parts.append("#AI #Hardware #DevOps #TechNews")
+    post_parts.append("#TechNews #AI #Geopolitics #Analytics")
     return "\n\n".join(post_parts)
 
 DIGEST_SYSTEM_PROMPT = """Ты — персональный автономный ИИ-аналитик новостей и технологических трендов (2026 год).

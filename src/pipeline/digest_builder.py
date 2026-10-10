@@ -346,13 +346,16 @@ class DigestBuilder:
                 "lead_image_url": ""
             }
 
-        # Извлекаем главное изображение новости для обложки поста
-        lead_image_url = ""
+        # Извлекаем изображения из источников, вошедших в дайджест
+        source_images = []
         for it in items:
             img = it.get("image_url")
-            if img and img.startswith("http"):
-                lead_image_url = img
-                break
+            if img and img.startswith("http") and img not in source_images:
+                source_images.append(img)
+                if len(source_images) >= 4:
+                    break
+
+        lead_image_url = source_images[0] if source_images else ""
 
         # Формируем сырой текст для LLM с полной фактурой
         raw_chunks = []
@@ -455,6 +458,7 @@ class DigestBuilder:
             "full_report_html_path": str(html_path),
             "full_report_md_path": str(md_path),
             "lead_image_url": lead_image_url,
+            "source_images": source_images,
             "provider": provider,
             "model": model,
             "latency": latency,

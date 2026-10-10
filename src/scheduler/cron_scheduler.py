@@ -5,7 +5,7 @@ from datetime import datetime
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from aiogram import Bot
-from aiogram.types import FSInputFile, LinkPreviewOptions
+from aiogram.types import FSInputFile, LinkPreviewOptions, InputMediaPhoto
 from aiogram.exceptions import TelegramBadRequest
 
 from src.pipeline.digest_builder import DigestBuilder
@@ -54,16 +54,26 @@ class DigestScheduler:
             greeting = f"☀️ <b>Доброе утро! Ваша аналитическая сводка на 08:50 ({self.timezone_name}):</b>\n\n"
             full_post = greeting + post_html
 
-            # Настройки предпросмотра фото новости
-            preview_options = None
-            if lead_img and lead_img.startswith("http"):
-                preview_options = LinkPreviewOptions(
-                    url=lead_img,
-                    prefer_large_media=True,
-                    show_above_text=True
-                )
+            # 1. Отправляем фотографии из источников, задействованных в дайджесте
+            source_images = res.get("source_images") or ([lead_img] if lead_img else [])
+            if len(source_images) >= 2:
+                media_group = [InputMediaPhoto(media=u) for u in source_images[:4]]
+                try:
+                    await self.bot.send_media_group(target_admin, media=media_group)
+                except Exception as e:
+                    logger.warning(f"Не удалось отправить медиагруппу источников ({e}), пробуем одиночное фото...")
+                    if lead_img:
+                        try:
+                            await self.bot.send_photo(target_admin, photo=lead_img)
+                        except Exception:
+                            pass
+            elif len(source_images) == 1:
+                try:
+                    await self.bot.send_photo(target_admin, photo=source_images[0])
+                except Exception as e:
+                    logger.warning(f"Не удалось отправить фото источника: {e}")
 
-            # 1. Отправляем визуальный пост с нативными сворачиваемыми блоками
+            # 2. Отправляем структурированный текстовый пост
             try:
                 if len(full_post) > 4000:
                     for x in range(0, len(full_post), 4000):
@@ -74,14 +84,13 @@ class DigestScheduler:
                         target_admin,
                         full_post,
                         parse_mode="HTML",
-                        reply_markup=kb,
-                        link_preview_options=preview_options
+                        reply_markup=kb
                     )
             except TelegramBadRequest as e:
                 logger.warning(f"Telegram parse error in morning digest ({e}), sending plain text...")
                 await self.bot.send_message(target_admin, full_post, reply_markup=kb)
 
-            # 2. Отправляем полноценный .MD документ прямо в Telegram
+            # 3. Отправляем полноценный .MD документ прямо в Telegram
             if md_path and os.path.exists(md_path):
                 today_str = datetime.now().strftime("%d.%m.%Y")
                 doc = FSInputFile(md_path, filename=f"Digest_{today_str}.md")

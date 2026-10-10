@@ -12,7 +12,8 @@ from aiogram.types import (
     CallbackQuery,
     MessageReactionUpdated,
     FSInputFile,
-    LinkPreviewOptions
+    LinkPreviewOptions,
+    InputMediaPhoto
 )
 from aiogram.exceptions import TelegramBadRequest
 
@@ -291,18 +292,29 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
         # Кнопки под постом: Оценка, Чат, Окно в TG, Скачать MD
         kb = get_digest_feedback_keyboard(web_app_url=get_web_app_url(), md_file_id=md_file_id)
 
-        # 1. Отправляем визуальный Telegram-пост со сворачиваемыми блоками и фото
-        preview_options = None
-        if lead_img and lead_img.startswith("http"):
-            preview_options = LinkPreviewOptions(
-                url=lead_img,
-                prefer_large_media=True,
-                show_above_text=True
-            )
+        # 1. Отправляем фотографии из источников, вошедших в подборку
+        source_images = res.get("source_images") or ([lead_img] if lead_img else [])
+        if len(source_images) >= 2:
+            media_group = [InputMediaPhoto(media=u) for u in source_images[:4]]
+            try:
+                await msg.answer_media_group(media=media_group)
+            except Exception as e:
+                logger.warning(f"Не удалось отправить медиагруппу источников ({e}), пробуем одиночное фото...")
+                if lead_img:
+                    try:
+                        await msg.answer_photo(photo=lead_img)
+                    except Exception:
+                        pass
+        elif len(source_images) == 1:
+            try:
+                await msg.answer_photo(photo=source_images[0])
+            except Exception as e:
+                logger.warning(f"Не удалось отправить фото источника: {e}")
 
-        await send_safe_reply(msg, post_html, reply_markup=kb, link_preview_options=preview_options)
+        # 2. Отправляем структурированный текстовый пост без цитат
+        await send_safe_reply(msg, post_html, reply_markup=kb)
 
-        # 2. Отправляем полноценный .MD файл прямо в Telegram
+        # 3. Отправляем полноценный .MD файл прямо в Telegram
         if md_path and os.path.exists(md_path):
             today_str = datetime.now().strftime("%d.%m.%Y")
             doc = FSInputFile(md_path, filename=f"Digest_{today_str}.md")
@@ -311,6 +323,25 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
                 caption="📑 <b>Полный аналитический отчет со всеми таблицами</b>\n<i>Нажмите на файл — откроется прямо в Telegram со всеми деталями.</i>",
                 parse_mode="HTML"
             )
+
+    # --------------------------------------------------------------------------
+    # Очистка базы и архивов: /clearnews или /purge
+    # --------------------------------------------------------------------------
+    @r.message(Command("clearnews", "purge"))
+    async def cmd_purge_data(msg: Message):
+        if not is_admin(msg.from_user.id):
+            return
+        storage.purge_all_news_and_digests()
+        for p in Path("data/digests").glob("*.*"):
+            try:
+                p.unlink()
+            except Exception:
+                pass
+        await send_safe_reply(
+            msg,
+            "🧹 <b>База новостей и архивы дайджестов полностью очищены!</b>\n\n"
+            "Все тестовые данные удалены. Система начнет следующий сбор с чистого листа по обновленному списку источников."
+        )
 
     # --------------------------------------------------------------------------
     # Скачивание исходного Markdown файла дайджеста
