@@ -23,19 +23,26 @@ DEFAULT_CATEGORIES = [
 
 def clean_channel_username(raw: str) -> str:
     """
-    Очищает введенную пользователем строку (ссылку или юзернейм) до чистого имени канала.
+    Очищает введенную пользователем строку (ссылку, юзернейм или ссылку биржи) до чистого имени канала.
     Примеры:
       @xakep_ru -> xakep_ru
       https://t.me/ai_newz -> ai_newz
       https://t.me/s/habr_com/ -> habr_com
       t.me/proglib -> proglib
+      https://t.me/+ieit_MggnZZkMWIy -> +ieit_MggnZZkMWIy
+      https://telega.in/channels/+TAijOjWcpARjOTcy/card -> +TAijOjWcpARjOTcy
+      https://telega.in/channels/Dev_Bubble/card -> Dev_Bubble
     """
     if not raw:
         return ""
     s = raw.strip()
+    # Убираем ссылки с telega.in
+    s = re.sub(r'^(?:https?://)?(?:www\.)?telega\.in/channels/', '', s, flags=re.IGNORECASE)
+    s = re.sub(r'/card/?$', '', s, flags=re.IGNORECASE)
+    # Убираем t.me префиксы
     s = re.sub(r'^(?:https?://)?(?:www\.)?(?:t\.me/)?(?:s/)?', '', s, flags=re.IGNORECASE)
     s = s.lstrip('@').strip().rstrip('/')
-    # Убираем возможные GET-параметры
+    # Убираем возможные GET-параметры и хэши
     s = s.split('?')[0].split('#')[0]
     return s.strip()
 
@@ -85,9 +92,9 @@ def add_telegram_channel(username_or_url: str, category: str = "Общее и Н
     if not clean_user:
         return False, "Некорректный юзернейм или ссылка канала."
 
-    # Проверка формата юзернейма Telegram (буквы, цифры, подчеркивания, от 3 до 35 символов)
-    if not re.match(r'^[a-zA-Z0-9_]{3,35}$', clean_user):
-        return False, f"Имя канала '<b>{clean_user}</b>' содержит недопустимые символы. Допустимы буквы A-Z, 0-9 и _."
+    # Проверка формата юзернейма или инвайт-хэша Telegram (буквы, цифры, _, -, возможный + в начале)
+    if not re.match(r'^\+?[a-zA-Z0-9_-]{3,45}$', clean_user):
+        return False, f"Имя канала '<b>{clean_user}</b>' содержит недопустимые символы."
 
     data = load_sources_data()
     channels = data.setdefault("sources", {}).setdefault("telegram_channels", [])

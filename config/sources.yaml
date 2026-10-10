@@ -1,88 +1,87 @@
 sources:
   telegram_channels:
-    # Технологии, ИИ и Инфобез (включая Хакер.ру)
-    - username: "ai_newz"
-      category: "Нейросети и ИИ"
-    - username: "xakep_ru"
-      category: "Кибербезопасность & IT"
-    - username: "exploitex"
-      category: "Кибербезопасность & IT"
-    - username: "habr_com"
-      category: "DevOps & Разработка"
-    - username: "rozetked"
-      category: "Hardware & Гаджеты"
-    - username: "proglib"
-      category: "Разработка и GameDev"
-
-    # Российские федеральные и новостные каналы (СВО, политика РФ)
-    - username: "rian_ru"
-      category: "Мировая политика & Новости"
-    - username: "tass_agency"
-      category: "Мировая политика & Новости"
-    - username: "kommersant"
-      category: "Международная аналитика"
-    - username: "rbc_news"
-      category: "Мировая политика & Новости"
-    - username: "rybar"
-      category: "Военно-политическая аналитика"
-
-    # Западные и международные каналы
-    - username: "bbcrussian"
-      category: "Международная аналитика"
-
+  - username: ai_newz
+    category: Нейросети и ИИ
+  - username: ai_machinelearning_big_data
+    category: Нейросети и ИИ
+  - username: xakep_ru
+    category: Кибербезопасность & IT
+  - username: hacker_magazine
+    category: Кибербезопасность & IT
+  - username: study_security
+    category: Кибербезопасность & OSINT
+  - username: exploitex
+    category: Кибербезопасность & IT
+  - username: Dev_Bubble
+    category: DevOps & Разработка
+  - username: habr_com
+    category: DevOps & Разработка
+  - username: rozetked
+    category: Hardware & Гаджеты
+  - username: proglib
+    category: Разработка и GameDev
+  - username: +TAijOjWcpARjOTcy
+    category: IT & Разработка
+  - username: +ieit_MggnZZkMWIy
+    category: Кибербезопасность & IT
+  - username: rian_ru
+    category: Мировая политика & Новости
+  - username: tass_agency
+    category: Мировая политика & Новости
+  - username: kommersant
+    category: Международная аналитика
+  - username: rbc_news
+    category: Мировая политика & Новости
+  - username: rybar
+    category: Военно-политическая аналитика
+  - username: bbcrussian
+    category: Международная аналитика
   rss_feeds:
-    # IT, Инфобез и Технологии (Хакер.ру, OpenNet, 3DNews, Habr, ArsTechnica)
-    - url: "https://xakep.ru/feed/"
-      name: "Журнал Хакер"
-      category: "Кибербезопасность & IT"
-    - url: "https://habr.com/ru/rss/hubs/all/"
-      name: "Habr Все публикации"
-      category: "IT & Разработка"
-    - url: "https://3dnews.ru/news/rss/"
-      name: "3DNews Daily"
-      category: "Hardware & GPU"
-    - url: "https://www.opennet.ru/opennews/opennews_all.rss"
-      name: "OpenNet Linux"
-      category: "DevOps & Linux"
-    - url: "https://www.bleepingcomputer.com/feed/"
-      name: "BleepingComputer"
-      category: "Кибербезопасность & IT"
-    - url: "https://feeds.arstechnica.com/arstechnica/index/"
-      name: "Ars Technica"
-      category: "Западные технологии & Наука"
-
-    # Российские федеральные и деловые издания (Внутренняя и внешняя политика, Украина)
-    - url: "https://www.kommersant.ru/RSS/news.xml"
-      name: "Коммерсантъ Главное"
-      category: "Международная аналитика"
-    - url: "https://rssexport.rbc.ru/rbcnews/news/30/full.rss"
-      name: "РБК Главные новости"
-      category: "Мировая политика & Новости"
-    - url: "https://ria.ru/export/rss2/archive/index.xml"
-      name: "РИА Новости Лента"
-      category: "Мировая политика & Новости"
-    - url: "https://www.vedomosti.ru/rss/news"
-      name: "Ведомости Новости"
-      category: "Экономика и Политика"
-
-    # Западные мировые агентства (позиция США, Европы, НАТО)
-    - url: "https://feeds.bbci.co.uk/news/world/rss.xml"
-      name: "BBC World News"
-      category: "Международная аналитика"
-    - url: "https://rss.dw.com/rdf/rss-ru-all"
-      name: "Deutsche Welle (RU)"
-      category: "Западные мировые медиа"
-    - url: "https://ru.euronews.com/rss"
-      name: "Euronews (RU)"
-      category: "Западные мировые медиа"
-
-    # Китайские и азиатские агентства (позиция КНР и Азии)
-    - url: "http://russian.news.cn/rss/world.xml"
-      name: "Синьхуа (Xinhua RU)"
-      category: "Китай & Азия"
-    - url: "http://russian.people.com.cn/rss/85173.xml"
-      name: "Жэньминь Жибао (RU)"
-      category: "Китай & Азия"
-    - url: "https://russian.cgtn.com/rss/news.xml"
-      name: "CGTN Russian"
-      category: "Китай & Азия"
+  - url: https://xakep.ru/feed/
+    name: Журнал Хакер
+    category: Кибербезопасность & IT
+  - url: https://habr.com/ru/rss/hubs/all/
+    name: Habr Все публикации
+    category: IT & Разработка
+  - url: https://3dnews.ru/news/rss/
+    name: 3DNews Daily
+    category: Hardware & GPU
+  - url: https://www.opennet.ru/opennews/opennews_all.rss
+    name: OpenNet Linux
+    category: DevOps & Linux
+  - url: https://www.bleepingcomputer.com/feed/
+    name: BleepingComputer
+    category: Кибербезопасность & IT
+  - url: https://feeds.arstechnica.com/arstechnica/index/
+    name: Ars Technica
+    category: Западные технологии & Наука
+  - url: https://www.kommersant.ru/RSS/news.xml
+    name: Коммерсантъ Главное
+    category: Международная аналитика
+  - url: https://rssexport.rbc.ru/rbcnews/news/30/full.rss
+    name: РБК Главные новости
+    category: Мировая политика & Новости
+  - url: https://ria.ru/export/rss2/archive/index.xml
+    name: РИА Новости Лента
+    category: Мировая политика & Новости
+  - url: https://www.vedomosti.ru/rss/news
+    name: Ведомости Новости
+    category: Экономика и Политика
+  - url: https://feeds.bbci.co.uk/news/world/rss.xml
+    name: BBC World News
+    category: Международная аналитика
+  - url: https://rss.dw.com/rdf/rss-ru-all
+    name: Deutsche Welle (RU)
+    category: Западные мировые медиа
+  - url: https://ru.euronews.com/rss
+    name: Euronews (RU)
+    category: Западные мировые медиа
+  - url: http://russian.news.cn/rss/world.xml
+    name: Синьхуа (Xinhua RU)
+    category: Китай & Азия
+  - url: http://russian.people.com.cn/rss/85173.xml
+    name: Жэньминь Жибао (RU)
+    category: Китай & Азия
+  - url: https://russian.cgtn.com/rss/news.xml
+    name: CGTN Russian
+    category: Китай & Азия

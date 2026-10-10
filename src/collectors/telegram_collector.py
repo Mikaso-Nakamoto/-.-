@@ -25,7 +25,30 @@ class TelegramWebCollector:
         if not username:
             return []
 
-        url = f"https://t.me/s/{username}"
+        target_user = username
+        # Если передан инвайт-хэш (+...), пробуем разрешить его в публичный канал
+        if target_user.startswith("+"):
+            try:
+                invite_url = f"https://t.me/{target_user}"
+                r_invite = await client.get(invite_url, headers=self.headers, timeout=8.0, follow_redirects=True)
+                if r_invite.status_code == 200:
+                    m = re.search(r'tg://resolve\?domain=([a-zA-Z0-9_]+)', r_invite.text)
+                    if m and not m.group(1).lower().startswith(("joinchat", "+")):
+                        target_user = m.group(1)
+                        logger.info(f"Инвайт {username} успешно разрешен в публичный канал @{target_user}")
+                    else:
+                        m2 = re.search(r'<meta property="og:url" content="https?://t\.me/([a-zA-Z0-9_]+)"', r_invite.text)
+                        if m2 and not m2.group(1).lower().startswith(("joinchat", "+")):
+                            target_user = m2.group(1)
+                            logger.info(f"Инвайт {username} разрешен через og:url в @{target_user}")
+            except Exception as e:
+                logger.debug(f"Не удалось разрешить инвайт {username}: {e}")
+
+        if target_user.startswith("+"):
+            logger.info(f"Канал {username} является закрытой инвайт-ссылкой без публичного Web-превью.")
+            return []
+
+        url = f"https://t.me/s/{target_user}"
         items = []
 
         try:
