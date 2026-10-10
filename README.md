@@ -65,6 +65,9 @@
    - Выжимка по конкретным интересам пользователя (`preferences.yaml`).
 7. **Готовность к удаленному доступу через Tailscale:**
    - Ноутбук может работать как Exit Node для телефона при белых списках 4G.
+8. **Мобильное приложение для Android (Google Discover + ИИ Чат):**
+   - Встроенный мобильный PWA-клиент на порту `8000`: лента новостей карточками, вкладка чата с ИИ и сводка. Устанавливается на экран Android в 1 клик!
+   - Полноценный REST API (`/api/feed`, `/api/chat`, `/api/feedback`) для нативного APK.
 
 ---
 
@@ -79,16 +82,19 @@
 │   └── sources.example.yaml       # Список Telegram-каналов и RSS
 ├── docs/
 │   ├── ARCHITECTURE.md            # Детальная архитектурная схема и описание
+│   ├── ANDROID_APP.md             # Инструкция по мобильному приложению
 │   ├── AGENT_GEMINI_GUIDE.md      # Инструкция для агента Gemini / Antigravity
 │   └── KESTRA_INTEGRATION.md      # Анализ и YAML-флоу для Kestra
 ├── src/
+│   ├── api/                       # REST API на FastAPI (для мобильного приложения)
+│   ├── web/static/                # Мобильный PWA-интерфейс в стиле Google Discover
 │   ├── bot/                       # Telegram-бот (Aiogram 3, клавиатуры, команды)
 │   ├── collectors/                # Сборщики данных (TG Web Scraper, RSS)
 │   ├── llm/                       # Интеллектуальный роутер и системные промпты
 │   ├── pipeline/                  # Хранилище SQLite WAL, фильтрация, дедупликация
 │   ├── scheduler/                 # Планировщик фоновых задач и таймера 08:50
 │   ├── config.py                  # Загрузка и валидация конфигурации (Pydantic)
-│   └── main.py                    # Главная точка входа
+│   └── main.py                    # Главная точка входа (Бот + Web API)
 ├── Dockerfile                     # Оптимизированный контейнер на Python 3.12-slim
 ├── docker-compose.yml             # Запуск одним кликом
 ├── requirements.txt               # Зависимости проекта

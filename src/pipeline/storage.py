@@ -56,6 +56,19 @@ class Storage:
                     context TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
+
+                CREATE TABLE IF NOT EXISTS news_feed (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    item_hash TEXT UNIQUE,
+                    source_type TEXT,
+                    channel TEXT,
+                    category TEXT,
+                    title TEXT,
+                    content TEXT,
+                    url TEXT,
+                    published_at TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
             """)
 
     def _hash_item(self, item: Dict[str, Any]) -> str:
@@ -81,6 +94,34 @@ class Storage:
                     "INSERT OR IGNORE INTO seen_items (item_hash, source_type, channel, url) VALUES (?, ?, ?, ?)",
                     (h, item.get("source_type"), item.get("channel"), item.get("url"))
                 )
+
+    def save_news_items(self, items: List[Dict[str, Any]]):
+        with self._get_connection() as conn:
+            for it in items:
+                h = it.get("item_hash") or self._hash_item(it)
+                conn.execute("""
+                    INSERT OR IGNORE INTO news_feed 
+                    (item_hash, source_type, channel, category, title, content, url, published_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    h,
+                    it.get("source_type", "unknown"),
+                    it.get("channel", ""),
+                    it.get("category", "Общее"),
+                    it.get("title", ""),
+                    it.get("content", ""),
+                    it.get("url", ""),
+                    it.get("published_at", "")
+                ))
+
+    def get_news_feed(self, limit: int = 40) -> List[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            cur = conn.execute(
+                "SELECT id, channel, category, title, content, url, published_at, created_at FROM news_feed ORDER BY id DESC LIMIT ?",
+                (limit,)
+            )
+            rows = cur.fetchall()
+            return [dict(row) for row in rows]
 
     def save_digest(self, digest_text: str, provider: str, count: int):
         with self._get_connection() as conn:

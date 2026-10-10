@@ -13,6 +13,8 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - TZ=${TZ:-Europe/Moscow}
+    ports:
+      - "8000:8000"
     extra_hosts:
       # Позволяет контейнеру обращаться к хосту (ноутбуку) или локальным IP
       - "host.docker.internal:host-gateway"

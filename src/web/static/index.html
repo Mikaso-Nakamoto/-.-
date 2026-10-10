@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>AI News Hub</title>
+  <link rel="manifest" href="/static/manifest.json">
+  <meta name="theme-color" content="#0f172a">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+    body { background-color: #090d16; color: #f1f5f9; padding-bottom: 75px; overflow-x: hidden; }
+
+    /* Верхняя панель */
+    header { position: sticky; top: 0; z-index: 100; background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(12px); border-bottom: 1px solid #1e293b; padding: 14px 18px; display: flex; justify-content: space-between; align-items: center; }
+    .logo { font-size: 1.15rem; font-weight: 700; background: linear-gradient(135deg, #38bdf8, #818cf8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .status-badge { font-size: 0.75rem; background: #1e293b; padding: 4px 10px; border-radius: 20px; border: 1px solid #334155; display: flex; align-items: center; gap: 6px; }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #22c55e; }
+
+    /* Контейнеры вкладок */
+    .tab-content { display: none; padding: 14px; max-width: 600px; margin: 0 auto; }
+    .tab-content.active { display: block; animation: fadeIn 0.2s ease-in-out; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+
+    /* Карточки в стиле Google Discover */
+    .card { background: #131c2e; border: 1px solid #1e293b; border-radius: 16px; padding: 16px; margin-bottom: 14px; box-shadow: 0 4px 20px rgba(0,0,0,0.25); transition: transform 0.15s ease; }
+    .card:active { transform: scale(0.99); }
+    .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    .category-pill { font-size: 0.7rem; font-weight: 600; padding: 3px 8px; border-radius: 6px; background: rgba(56, 189, 248, 0.15); color: #38bdf8; text-transform: uppercase; }
+    .channel-name { font-size: 0.75rem; color: #94a3b8; }
+    .card-title { font-size: 1.05rem; font-weight: 600; line-height: 1.35; margin-bottom: 8px; color: #f8fafc; }
+    .card-body { font-size: 0.88rem; color: #cbd5e1; line-height: 1.45; margin-bottom: 12px; }
+    .card-footer { display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #1e293b; padding-top: 10px; }
+    .card-link { font-size: 0.8rem; color: #818cf8; text-decoration: none; font-weight: 500; }
+    .card-actions { display: flex; gap: 8px; }
+    .btn-action { background: #1e293b; border: 1px solid #334155; color: #f1f5f9; padding: 5px 10px; border-radius: 8px; cursor: pointer; font-size: 0.8rem; }
+    .btn-action:hover { background: #334155; }
+
+    /* Вкладка Чата */
+    .chat-container { display: flex; flex-direction: column; height: calc(100vh - 150px); }
+    .chat-messages { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding-bottom: 10px; }
+    .bubble { max-width: 82%; padding: 12px 16px; border-radius: 18px; font-size: 0.92rem; line-height: 1.45; word-wrap: break-word; }
+    .bubble.user { align-self: flex-end; background: #3b82f6; color: #ffffff; border-bottom-right-radius: 4px; }
+    .bubble.bot { align-self: flex-start; background: #1e293b; color: #f1f5f9; border-bottom-left-radius: 4px; border: 1px solid #334155; }
+    .bubble-meta { font-size: 0.7rem; color: #94a3b8; margin-top: 4px; text-align: right; }
+    .chat-input-bar { display: flex; gap: 8px; padding-top: 10px; border-top: 1px solid #1e293b; }
+    .chat-input { flex: 1; background: #131c2e; border: 1px solid #334155; border-radius: 24px; padding: 12px 18px; color: #fff; font-size: 0.95rem; outline: none; }
+    .chat-send { background: #3b82f6; border: none; border-radius: 50%; width: 45px; height: 45px; color: #fff; font-weight: bold; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+
+    /* Нижняя навигация */
+    nav { position: fixed; bottom: 0; left: 0; right: 0; height: 60px; background: rgba(15, 23, 42, 0.95); backdrop-filter: blur(14px); border-top: 1px solid #1e293b; display: flex; justify-content: space-around; align-items: center; z-index: 100; }
+    .nav-item { display: flex; flex-direction: column; align-items: center; gap: 4px; color: #64748b; font-size: 0.75rem; text-decoration: none; cursor: pointer; flex: 1; }
+    .nav-item.active { color: #38bdf8; font-weight: 600; }
+    .nav-icon { font-size: 1.25rem; }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="logo">⚡️ AI News Discover</div>
+    <div class="status-badge" id="statusBadge">
+      <div class="status-dot" id="statusDot"></div>
+      <span id="statusText">Подключение...</span>
+    </div>
+  </header>
+
+  <!-- ВКЛАДКА 1: GOOGLE DISCOVER FEED -->
+  <main class="tab-content active" id="tabFeed">
+    <div id="feedList">
+      <p style="text-align:center; color:#64748b; margin-top:40px;">Загрузка свежих публикаций...</p>
+    </div>
+  </main>
+
+  <!-- ВКЛАДКА 2: ИИ ЧАТ -->
+  <main class="tab-content" id="tabChat">
+    <div class="chat-container">
+      <div class="chat-messages" id="chatMessages">
+        <div class="bubble bot">
+          👋 Привет! Я твой ИИ-ассистент. Я знаю свежие новости за сегодня и готов ответить на любые вопросы!
+        </div>
+      </div>
+      <div class="chat-input-bar">
+        <input type="text" class="chat-input" id="chatInput" placeholder="Спросите о новости или задайте задачу...">
+        <button class="chat-send" id="chatSend">➤</button>
+      </div>
+    </div>
+  </main>
+
+  <!-- ВКЛАДКА 3: ДАЙДЖЕСТ -->
+  <main class="tab-content" id="tabDigest">
+    <div class="card">
+      <div class="card-header">
+        <span class="category-pill">08:50 ДАЙДЖЕСТ</span>
+      </div>
+      <div id="digestBody" style="line-height:1.6; font-size:0.95rem; white-space: pre-wrap;">
+        Загрузка последнего дайджеста...
+      </div>
+    </div>
+  </main>
+
+  <!-- Нижняя панель навигации Android -->
+  <nav>
+    <div class="nav-item active" onclick="switchTab('tabFeed', this)">
+      <div class="nav-icon">📰</div>
+      <div>Новости</div>
+    </div>
+    <div class="nav-item" onclick="switchTab('tabChat', this)">
+      <div class="nav-icon">💬</div>
+      <div>ИИ Чат</div>
+    </div>
+    <div class="nav-item" onclick="switchTab('tabDigest', this)">
+      <div class="nav-icon">☀️</div>
+      <div>Сводка</div>
+    </div>
+  </nav>
+
+  <script>
+    function switchTab(tabId, el) {
+      document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+      document.getElementById(tabId).classList.add('active');
+      el.classList.add('active');
+
+      if (tabId === 'tabDigest') loadDigest();
+    }
+
+    async function loadStatus() {
+      try {
+        const r = await fetch('/api/status');
+        const d = await r.json();
+        const dot = document.getElementById('statusDot');
+        const txt = document.getElementById('statusText');
+        if (d.local_pc_online) {
+          dot.style.background = '#22c55e';
+          txt.innerText = 'ПК (Qwen 2.5)';
+        } else {
+          dot.style.background = '#38bdf8';
+          txt.innerText = d.active_provider.toUpperCase();
+        }
+      } catch (e) {
+        document.getElementById('statusText').innerText = 'Офлайн';
+      }
+    }
+
+    async function loadFeed() {
+      try {
+        const r = await fetch('/api/feed');
+        const data = await r.json();
+        const container = document.getElementById('feedList');
+        if (!data.items || data.items.length === 0) {
+          container.innerHTML = '<p style="text-align:center; color:#64748b; margin-top:40px;">Пока нет новостей. Нажмите сбор в боте!</p>';
+          return;
+        }
+        container.innerHTML = data.items.map(item => `
+          <div class="card">
+            <div class="card-header">
+              <span class="category-pill">${item.category || 'Общее'}</span>
+              <span class="channel-name">${item.channel || ''}</span>
+            </div>
+            <div class="card-title">${item.title || ''}</div>
+            <div class="card-body">${(item.content || '').substring(0, 240)}...</div>
+            <div class="card-footer">
+              <a href="${item.url}" target="_blank" class="card-link">Открыть оригинал →</a>
+              <div class="card-actions">
+                <button class="btn-action" onclick="sendFeedback('like', '${item.title}')">👍</button>
+                <button class="btn-action" onclick="sendFeedback('dislike', '${item.title}')">👎</button>
+              </div>
+            </div>
+          </div>
+        `).join('');
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    async function loadDigest() {
+      try {
+        const r = await fetch('/api/digest/latest');
+        const d = await r.json();
+        document.getElementById('digestBody').innerText = d.digest;
+      } catch (e) {
+        document.getElementById('digestBody').innerText = 'Не удалось загрузить дайджест.';
+      }
+    }
+
+    async function sendFeedback(reaction, title) {
+      await fetch('/api/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reaction, context: title })
+      });
+      alert(reaction === 'like' ? '👍 Сохранено в предпочтения' : '👎 Учтено!');
+    }
+
+    async function sendMessage() {
+      const input = document.getElementById('chatInput');
+      const text = input.value.trim();
+      if (!text) return;
+
+      const msgs = document.getElementById('chatMessages');
+      msgs.innerHTML += `<div class="bubble user">${text}</div>`;
+      input.value = '';
+      msgs.scrollTop = msgs.scrollHeight;
+
+      try {
+        const r = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: text })
+        });
+        const res = await r.json();
+        const content = res.content || 'Ошибка ответа';
+        const meta = `${res.provider.toUpperCase()} (${res.model}) • ${res.latency}с`;
+
+        msgs.innerHTML += `
+          <div class="bubble bot">
+            ${content}
+            <div class="bubble-meta">🤖 ${meta}</div>
+          </div>
+        `;
+        msgs.scrollTop = msgs.scrollHeight;
+      } catch (e) {
+        msgs.innerHTML += `<div class="bubble bot">⚠️ Ошибка соединения с сервером.</div>`;
+      }
+    }
+
+    document.getElementById('chatSend').onclick = sendMessage;
+    document.getElementById('chatInput').onkeypress = (e) => { if (e.key === 'Enter') sendMessage(); };
+
+    loadStatus();
+    loadFeed();
+  </script>
+</body>
+</html>

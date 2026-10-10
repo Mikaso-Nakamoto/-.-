@@ -42,6 +42,10 @@ class DigestBuilder:
         unseen = self.storage.filter_unseen_items(all_items)
         logger.info(f"Собрано {len(all_items)} публикаций, из них новых: {len(unseen)}")
 
+        # Сохраняем свежие публикации в ленту новостей для Android / Web API
+        if unseen:
+            self.storage.save_news_items(unseen)
+
         # Фильтрация по стоп-словам из preferences
         prefs = load_preferences()
         blacklist = prefs.get("filters", {}).get("blacklist", [])
