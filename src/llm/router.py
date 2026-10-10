@@ -10,6 +10,24 @@ from src.llm.prompts import clean_telegram_markdown
 
 logger = logging.getLogger(__name__)
 
+def sanitize_language_output(text: str) -> str:
+    """
+    Очищает ответ модели от случайных глифов и иероглифов, возникающих
+    при сбое квантования/внимания мультиязычных локальных моделей (например Qwen 2.5 7B):
+    - Удаляет случайные китайские иероглифы ([\u4e00-\u9fff\u3400-\u4dbf]+).
+    - Удаляет случайную арабскую вязь ([\u0600-\u06ff\u0750-\u077f\ufb50-\ufdff\ufe70-\ufeff]+).
+    - Нормализует пробелы.
+    """
+    if not text:
+        return ""
+    # Удаляем китайские иероглифы
+    cleaned = re.sub(r'[\u4e00-\u9fff\u3400-\u4dbf]+', '', text)
+    # Удаляем арабскую вязь
+    cleaned = re.sub(r'[\u0600-\u06ff\u0750-\u077f\ufb50-\ufdff\ufe70-\ufeff]+', '', cleaned)
+    # Нормализуем пробелы
+    cleaned = re.sub(r'[ \t]{2,}', ' ', cleaned)
+    return cleaned.strip()
+
 # Кэш актуальных бесплатных моделей OpenRouter
 _cached_openrouter_free_models: List[str] = []
 _last_openrouter_fetch_time: float = 0.0
@@ -258,7 +276,17 @@ class LLMRouter:
                         f"ТЕКУЩАЯ ДАТА И ВРЕМЯ НА СЕРВЕРЕ: {days[now.weekday()]}, {now.strftime('%d.%m.%Y, %H:%M')}.\n"
                         f"Ты абсолютно точно знаешь текущую дату, год ({now.year}) и время."
                     )
-                    system_prompt = f"{base_sys_prompt}\n\n{date_context}"
+                    language_lock = (
+                        "\n\nСТРОГОЕ ЯЗЫКОВОЕ ПРАВИЛО (СТРОЖАЙШИЙ ПРИОРИТЕТ):\n"
+                        "1. Отвечай ИСКЛЮЧИТЕЛЬНО на грамотном, естественном и связном русском языке.\n"
+                        "2. КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО использовать китайские иероглифы (中文), "
+                        "арабскую вязь (العربية) или смешивать иностранные слова посреди русских предложений.\n"
+                        "3. Все имена, географические названия и страны пиши по-русски (Вашингтон, Киев, Пекин, Москва, Харьков, Трамп и т.д.). "
+                        "Общепринятые IT-термины (Docker, GPU, LLM) допустимо оставлять на английском, но грамматика всего предложения должна быть СТРОГО русской!\n"
+                        "4. При вопросах о мировой геополитике (включая конфликт вокруг Украины, отношения РФ, США, НАТО, ЕС, Китая) "
+                        "давай объективный, фактологический и взвешенный анализ на базе свежих новостей и позиций сторон, спокойно и без эмоциональных перекосов."
+                    )
+                    system_prompt = f"{base_sys_prompt}\n\n{date_context}{language_lock}"
 
                     # Инъекция контекста новостей (дайджест + свежие статьи из базы)
                     news_block = ""
@@ -280,13 +308,25 @@ class LLMRouter:
 
                 try:
                     logger.info(f"Запрос к LLM [{prov}], модель: {model}, задача: {task}...")
-                    resp = await client.chat.completions.create(
-                        model=model,
-                        messages=messages,
-                        temperature=0.3 if task == "digest" else 0.7
-                    )
-                    raw_content = resp.choices[0].message.content
-                    content = clean_telegram_markdown(raw_content)
+                    is_local = (prov == "local")
+                    # Для локальной Qwen 2.5 7B понижаем температуру и добавляем штрафы за повторы против сбоя языков
+                    temperature = 0.3 if task == "digest" else (0.35 if is_local else 0.6)
+
+                    call_kwargs = {
+                        "model": model,
+                        "messages": messages,
+                        "temperature": temperature,
+                        "top_p": 0.9
+                    }
+                    if is_local:
+                        call_kwargs["frequency_penalty"] = 0.15
+                        call_kwargs["presence_penalty"] = 0.05
+
+                    resp = await client.chat.completions.create(**call_kwargs)
+                    raw_content = resp.choices[0].message.content or ""
+                    # Защита от мультиязычного сбоя токенов для локальных моделей
+                    sanitized_content = sanitize_language_output(raw_content)
+                    content = clean_telegram_markdown(sanitized_content)
 
                     if model != initial_model:
                         logger.info(f"Провайдер {prov}: успешно ответила резервная модель {model}. Запоминаем её.")

@@ -5,11 +5,19 @@ user:
 
 interests:
   - name: "Нейросети и ИИ"
-    keywords: ["qwen", "llama", "deepseek", "openai", "claude", "gemini", "нейросеть", "llm", "vllm", "ollama", "инференс"]
+    keywords: ["qwen", "llama", "deepseek", "openai", "claude", "gemini", "нейросеть", "llm", "vllm", "ollama", "инференс", "модель"]
+    priority: "high"
+
+  - name: "Кибербезопасность & IT"
+    keywords: ["хакер", "уязвимость", "взлом", "malware", "ddos", "безопасность", "cve", "инфобез", "exploit", "патч", "эксплойт"]
     priority: "high"
 
   - name: "Hardware & GPU"
-    keywords: ["nvidia", "geforce", "rtx", "amd", "intel", "процессор", "видеокарта", "vram", "чип"]
+    keywords: ["nvidia", "geforce", "rtx", "amd", "intel", "процессор", "видеокарта", "vram", "чип", "память"]
+    priority: "high"
+
+  - name: "Мировая политика & Геополитика"
+    keywords: ["украина", "сво", "россия", "сша", "нато", "китай", "санкции", "переговоры", "дипломатия", "евросоюз", "военн", "фронт", "события"]
     priority: "high"
 
   - name: "DevOps & Self-Hosted"
@@ -17,7 +25,11 @@ interests:
     priority: "medium"
 
   - name: "Разработка и GameDev"
-    keywords: ["python", "gamedev", "unreal", "unity", "github", "open source", "релиз"]
+    keywords: ["python", "gamedev", "unreal", "unity", "github", "open source", "релиз", "код"]
+    priority: "medium"
+
+  - name: "Экономика и Финансы"
+    keywords: ["рынки", "ставка", "инфляция", "рубль", "доллар", "нефть", "газ", "цб", "акции"]
     priority: "medium"
 
 filters:
