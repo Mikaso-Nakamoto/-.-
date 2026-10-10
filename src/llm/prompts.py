@@ -152,13 +152,57 @@ def format_digest_to_collapsible_html(raw_text: str) -> str:
 
     return markdown_to_telegram_html(raw_text)
 
+def clean_markdown_for_document(text: str) -> str:
+    """
+    Очищает Markdown-документ от артефактов, вызывающих отображение
+    черного фона (блоков кода) во встроенном ридере Telegram:
+    - Удаляет обрамляющие тройные кавычки (```markdown ... ```).
+    - Удаляет случайные блоки кода, в которые LLM мог завернуть обычные секции.
+    - Убирает отступы в 4+ пробелов в начале абзацев (Markdown воспринимает их как <pre><code>).
+    - Гарантирует аккуратный, чистый Markdown с нормальными шрифтами и заголовками.
+    """
+    if not text:
+        return ""
+
+    # 1. Удаляем обрамляющие ```markdown и завершающие ```
+    cleaned = re.sub(r'^\s*```(?:markdown|md)?\s*\n', '', text.strip(), flags=re.IGNORECASE)
+    cleaned = re.sub(r'\n```\s*$', '', cleaned.strip())
+
+    # 2. Удаляем системные теги промпта, если LLM их сгенерировал
+    cleaned = re.sub(r'={2,}\s*(?:TELEGRAM_POST|FULL_REPORT)\s*={2,}', '', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'(?m)^(?:TELEGRAM_POST|FULL_REPORT)\s*$', '', cleaned, flags=re.IGNORECASE)
+
+    # 3. Нормализуем строки: удаляем лишние 4-пробельные отступы перед обычным текстом
+    # (так как в Markdown 4 пробела = блок кода с черным фоном)
+    lines = cleaned.split("\n")
+    fixed_lines = []
+    in_code_block = False
+
+    for line in lines:
+        if line.strip().startswith("```"):
+            in_code_block = not in_code_block
+            fixed_lines.append(line)
+            continue
+
+        if not in_code_block:
+            # Если строка начинается с 4+ пробелов и не является элементом вложенного списка
+            if re.match(r'^\s{4,}', line) and not line.strip().startswith(("-", "*", "+", "|", "1.", "2.", "3.", "4.", "5.", "6.", "7.", "8.", "9.")):
+                fixed_lines.append(line.lstrip())
+            else:
+                fixed_lines.append(line)
+        else:
+            fixed_lines.append(line)
+
+    return "\n".join(fixed_lines).strip()
+
 def extract_clean_digest_post(raw_text: str, date_str: str) -> str:
     """
     Формирует лаконичный, аккуратный Telegram-пост из любого вывода LLM:
     - Никаких служебных меток TELEGRAM_POST, FULL_REPORT, ===.
     - Никаких сырых Markdown-таблиц внутри сообщения (они идут в .md файл).
-    - Каждая новость оформляется как <blockquote expandable><b>① Заголовок</b>\nСуть\n🔗 Ссылка</blockquote>
-    - В конце хэштеги.
+    - Каждая новость оформляется как <blockquote expandable><b>① Заголовок</b>\n• Тезис...\n• Важность...\n🔗 Ссылка</blockquote>.
+    - Плотность текста достаточна (4-5 строк), чтобы Telegram гарантированно показал нативную стрелку сворачивания ∨.
+    - Только реальные факты из публикаций, без воды.
     """
     if not raw_text:
         return f"<b>⚡️ TECH & AI DIGEST — {date_str}</b>\n\nНет данных для отображения."
@@ -188,6 +232,7 @@ def extract_clean_digest_post(raw_text: str, date_str: str) -> str:
             num_idx = int(cells[0])
             theme = cells[1]
             body = cells[3] if len(cells) > 3 else (cells[2] if len(cells) > 2 else "")
+            cat = cells[2] if len(cells) > 3 else "Общее"
             link = ""
             for c in cells:
                 m_url = re.search(r'https?://[^\s\)]+', c)
@@ -196,55 +241,81 @@ def extract_clean_digest_post(raw_text: str, date_str: str) -> str:
                     break
             if not link and num_idx in footnote_links:
                 link = footnote_links[num_idx]
-            table_rows.append((theme, body, link))
+            table_rows.append((theme, body, cat, link))
 
     items = []
 
-    # 1. Поиск секции детального разбора
-    detail_match = re.search(r'##\s*🔍?\s*Детальный разбор(.*?)(?=\n##|\Z)', cleaned, flags=re.DOTALL | re.IGNORECASE)
-    target_text = detail_match.group(1) if detail_match else cleaned
-
-    section_pattern = r'(?m)^(?:###\s*|\d{1,2}[\.\)]\s*)(?:[0-9]{1,2}[\.\)]|[①-⑳])?\s*(?:[\*\_]{0,2})([^\n\*\_\|]{4,90})(?:[\*\_]{0,2})\s*\n'
-    parts = re.split(section_pattern, target_text)
+    # 1. Поиск детальных секций разбора
+    # Поддерживаем любые стили разметки моделей (### 1. Тема, *Разработка и GameDev*, **1. Категория**)
+    section_split_pattern = r'(?m)^(?:#{1,4}\s*|\*{1,2}|\d{1,2}[\.\)]\s*)([A-Za-zА-Яа-я0-9\s&_\-—/]{3,65})(?:\*{1,2})?\s*$'
+    parts = re.split(section_split_pattern, cleaned)
 
     if len(parts) >= 3:
         num = 0
         for i in range(1, len(parts), 2):
-            t_name = parts[i].strip()
-            t_body = parts[i+1].strip() if i+1 < len(parts) else ""
-            if len(t_name) < 3 or t_name.lower().startswith(("тема", "№", "категория", "сравнительная")):
+            sec_title = parts[i].strip()
+            sec_body = parts[i+1].strip() if i+1 < len(parts) else ""
+            if len(sec_title) < 3 or sec_title.lower().startswith((
+                "тема", "№", "категория", "сравнительная", "архитектурные", "детальный", "список", "таблица"
+            )):
                 continue
+
             c_num = CIRCLED_NUMS[num] if num < len(CIRCLED_NUMS) else f"[{num+1}]"
             num += 1
 
+            # Извлечение ссылки на источник
             link_html = ""
-            m_l = re.search(r'\[([^\]]+)\]\((https?://[^\)]+)\)', t_body)
+            m_l = re.search(r'\[([^\]]+)\]\((https?://[^\)]+)\)', sec_body)
             if m_l:
                 link_html = f'\n🔗 <a href="{m_l.group(2)}">{html.escape(m_l.group(1))}</a>'
-                t_body = re.sub(r'\[([^\]]+)\]\((https?://[^\)]+)\)', '', t_body)
+                sec_body = re.sub(r'\[([^\]]+)\]\((https?://[^\)]+)\)', '', sec_body)
             elif num in footnote_links:
                 link_html = f'\n🔗 <a href="{footnote_links[num]}">Первоисточник</a>'
 
-            clean_lines = []
-            for bl in t_body.split("\n"):
-                bl = bl.strip()
-                if not bl or bl.startswith("|") or bl.startswith("#"):
+            # Парсинг содержательных тезисов новости
+            headline = ""
+            lines = []
+            for raw_line in sec_body.split("\n"):
+                l = raw_line.strip()
+                if not l or l.startswith("|") or l.startswith("#"):
                     continue
-                bl = re.sub(r'^\s*[\*\-]\s*', '', bl)
-                bl = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', bl)
-                clean_lines.append(bl)
+                # Если первая строчка — заголовок новости без двоеточия
+                if not headline and re.match(r'^[\*\-•]\s+[^:]{5,100}$', l):
+                    headline = re.sub(r'^[\*\-•]\s+', '', l).strip()
+                    continue
+                # Очищаем маркер списка, сохраняя форматирование жирного текста
+                clean_l = re.sub(r'^\s*[\*\-•]\s+', '', l).strip()
+                clean_l = re.sub(r'\*\*([^\*]+?)\*\*', r'<b>\1</b>', clean_l)
+                if clean_l and len(clean_l) > 5:
+                    lines.append(f"• {clean_l}")
 
-            clean_body = " ".join(clean_lines[:2])[:250]
-            items.append(f"<blockquote expandable><b>{c_num} {html.escape(t_name)}</b>\n{clean_body}{link_html}</blockquote>")
+            # Формируем заголовок блока
+            full_title = sec_title
+            if headline and headline.lower() not in sec_title.lower():
+                full_title = f"{sec_title}: {headline}"
+            full_title = html.escape(full_title.replace("*", "").replace("#", "").strip())
 
-    # 2. Если секций нет, формируем из строк таблицы
+            # Сохраняем 2-4 конкретных содержательных пункта (Тезис, Важность, Детали)
+            body_bullets = "\n".join(lines[:4]) if lines else "• <b>Суть:</b> Подробности события опубликованы в источнике."
+
+            # Гарантируем, что в блоке от 4 строк для срабатывания нативного шеврона ∨ в Telegram Desktop
+            block = f"<blockquote expandable><b>{c_num} {full_title}</b>\n{body_bullets}{link_html}</blockquote>"
+            items.append(block)
+
+    # 2. Если секций нет, формируем из строк таблицы с плотной структурой
     if not items and table_rows:
-        for num, (theme, body, link) in enumerate(table_rows[:7]):
+        for num, (theme, body, cat, link) in enumerate(table_rows[:7]):
             c_num = CIRCLED_NUMS[num] if num < len(CIRCLED_NUMS) else f"[{num+1}]"
             link_html = f'\n🔗 <a href="{link}">Первоисточник</a>' if link else ""
             clean_theme = html.escape(theme.replace("**", "").replace("*", "").strip())
             clean_body = html.escape(body.replace("**", "").replace("*", "").strip())
-            items.append(f"<blockquote expandable><b>{c_num} {clean_theme}</b>\n{clean_body}{link_html}</blockquote>")
+            clean_cat = html.escape(cat.replace("**", "").replace("*", "").strip())
+
+            items.append(
+                f"<blockquote expandable><b>{c_num} {clean_cat}: {clean_theme}</b>\n"
+                f"• <b>Факты:</b> {clean_body}\n"
+                f"• <b>Значимость:</b> Важное технологическое событие в категории «{clean_cat}».{link_html}</blockquote>"
+            )
 
     # 3. Если в тексте уже были блоки blockquote
     if not items and "<blockquote" in cleaned:
@@ -263,7 +334,7 @@ def extract_clean_digest_post(raw_text: str, date_str: str) -> str:
     return "\n\n".join(post_parts)
 
 DIGEST_SYSTEM_PROMPT = """Ты — персональный автономный ИИ-аналитик новостей и технологических трендов (2026 год).
-Твоя задача — формировать глубокий аналитический дайджест в формате Markdown.
+Твоя задача — формировать глубокий аналитический дайджест в формате чистого Markdown.
 
 СТРУКТУРА ОТВЕТА (MARKDOWN):
 # ⚡️ TECH & AI DIGEST — [Дата]
@@ -276,21 +347,26 @@ DIGEST_SYSTEM_PROMPT = """Ты — персональный автономный
 | 1 | ...            | ...       | ...                  | [Источник](url)|
 
 ## 🔍 Детальный технический разбор
-### 1. [Название темы]
-- **Суть:** [Что произошло, технические факты и цифры]
-- **Почему это важно:** [Технические последствия и практическая польза]
+### 1. [Категория]: [Название темы]
+- **Что произошло:** [Конкретные факты, цифры, релизы строго из предоставленного текста]
+- **Технические детали:** [Архитектура, стек, бенчмарки, характеристики из текста]
+- **Практическое влияние:** [Что это дает разработчику/пользователю, где применяется]
 - **Ссылка:** [Источник](url)
 
-### 2. [Название темы]
+### 2. [Категория]: [Название темы]
 ...
 
 ## 💡 Архитектурные выводы дня
 [Краткие выводы и практические рекомендации]
 
-ПРАВИЛА:
-1. Пиши емко, строго по фактам, без маркетинговой «воды».
-2. Исключай любую рекламу, партнерские промокоды, розыгрыши и крипто-скамы.
-3. Сохраняй реальные ссылки на первоисточники из предоставленных данных.
+ЖЕСТКИЕ ПРАВИЛА:
+1. ИСПОЛЬЗУЙ ТОЛЬКО РЕАЛЬНЫЕ ФАКТЫ ИЗ ТЕКСТА: категорически запрещена вода, общие фразы или галлюцинации. Если в новости нет деталей, пиши только то, что точно известно.
+2. ФОРМАТИРОВАНИЕ ДОКУМЕНТА (БЕЗ ЧЕРНОГО ФОНА):
+   - КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО оборачивать весь документ или текст в тройные обратные кавычки (```markdown ... ```)!
+   - Запрещены отступы в 4 пробела перед строками (в Markdown это превращает текст в программный код).
+   - Пиши чистый текст: заголовки (#, ##, ###), таблицы (|) и списки (-).
+3. Исключай рекламу, партнерские промокоды, кликбейт, розыгрыши и крипто-скамы.
+4. Сохраняй реальные ссылки на первоисточники из предоставленных данных.
 """
 
 def build_digest_user_prompt(

@@ -354,13 +354,13 @@ class DigestBuilder:
                 lead_image_url = img
                 break
 
-        # Формируем сырой текст для LLM
+        # Формируем сырой текст для LLM с полной фактурой
         raw_chunks = []
-        for i, it in enumerate(items[:25], 1): # До 25 новостей в контекст
+        for i, it in enumerate(items[:20], 1): # До 20 ключевых новостей в контекст
             raw_chunks.append(
                 f"[{i}] Источник: {it.get('channel', 'Канал')} ({it.get('category', 'Общее')})\n"
                 f"Заголовок: {it.get('title', 'Новость')}\n"
-                f"Текст: {it.get('content', '')[:400]}\n"
+                f"Текст публикации: {it.get('content', '')[:800]}\n"
                 f"Ссылка: {it.get('url', '')}\n"
             )
 
@@ -399,9 +399,12 @@ class DigestBuilder:
         timestamp_str = now_dt.strftime("%Y-%m-%d_%H%M%S")
         date_display = now_dt.strftime("%d.%m.%Y")
 
-        # 1. Извлекаем лаконичный Telegram-пост (без таблиц, без артефактов промпта, с нативными спойлерами)
-        from src.llm.prompts import extract_clean_digest_post
+        # 1. Извлекаем лаконичный Telegram-пост с нативными сворачиваемыми блоками <blockquote expandable>
+        from src.llm.prompts import extract_clean_digest_post, clean_markdown_for_document
         telegram_post_html = extract_clean_digest_post(content, date_display)
+
+        # Очищаем Markdown-документ от обрамляющих ``` и лишних отступов (убираем черный фон в Telegram)
+        clean_md = clean_markdown_for_document(content)
 
         # Добавляем футер с моделью и временем
         provider_footer = f"\n\n🤖 <b>{provider.upper()}</b> (<code>{model}</code>) • ⏱ {latency} сек."
@@ -416,12 +419,12 @@ class DigestBuilder:
         md_path = self.digests_dir / md_filename
         html_path = self.digests_dir / html_filename
 
-        # Записываем Markdown отчет со всеми таблицами и детальным анализом
-        md_path.write_text(content, encoding="utf-8")
+        # Записываем чистый Markdown отчет (без черных блоков кода)
+        md_path.write_text(clean_md, encoding="utf-8")
 
         # Записываем автономный HTML документ для архива
         html_content = self._generate_standalone_html(
-            report_md=content,
+            report_md=clean_md,
             date_str=date_display,
             provider=provider,
             model=model,
@@ -436,7 +439,7 @@ class DigestBuilder:
             provider=provider,
             model=model,
             post_html=telegram_post_html,
-            report_md=content,
+            report_md=clean_md,
             report_html_path=str(html_path),
             report_md_path=str(md_path),
             lead_image_url=lead_image_url
@@ -448,7 +451,7 @@ class DigestBuilder:
             "success": True,
             "text": telegram_post_html,
             "telegram_post_html": telegram_post_html,
-            "full_report_md": content,
+            "full_report_md": clean_md,
             "full_report_html_path": str(html_path),
             "full_report_md_path": str(md_path),
             "lead_image_url": lead_image_url,
