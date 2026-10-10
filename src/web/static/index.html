@@ -3,228 +3,328 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>AI News Hub</title>
+  <title>Antigravity // AI News Hub</title>
   <link rel="manifest" href="/static/manifest.json">
-  <meta name="theme-color" content="#0f172a">
+  <meta name="theme-color" content="#0d0d11">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
-    body { background-color: #090d16; color: #f1f5f9; padding-bottom: 75px; overflow-x: hidden; }
+    :root {
+      --bg: #0d0d11;
+      --card-bg: #15161b;
+      --card-border: #22232a;
+      --header-bg: rgba(13, 13, 17, 0.92);
+      --text-main: #f4f4f7;
+      --text-muted: #8b8d99;
+      --accent-cyan: #38bdf8;
+      --accent-amber: #f59e0b;
+      --accent-green: #10b981;
+      --accent-blue: #3b82f6;
+    }
 
-    /* Верхняя панель */
-    header { position: sticky; top: 0; z-index: 100; background: rgba(15, 23, 42, 0.88); backdrop-filter: blur(12px); border-bottom: 1px solid #1e293b; padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; }
-    .logo { font-size: 1.1rem; font-weight: 700; background: linear-gradient(135deg, #38bdf8, #818cf8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-    .status-badge { font-size: 0.75rem; background: #1e293b; padding: 4px 10px; border-radius: 20px; border: 1px solid #334155; display: flex; align-items: center; gap: 6px; cursor: pointer; }
-    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #94a3b8; }
-    .status-dot.online { background: #22c55e; box-shadow: 0 0 8px #22c55e; }
-    .status-dot.cloud { background: #38bdf8; }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
+    body { background-color: var(--bg); color: var(--text-main); padding-bottom: 70px; overflow-x: hidden; -webkit-font-smoothing: antialiased; }
+    code, pre, .mono { font-family: 'JetBrains Mono', Consolas, monospace; }
+
+    /* Верхний статус-бар в стиле Antigravity */
+    header {
+      position: sticky; top: 0; z-index: 100;
+      background: var(--header-bg); backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--card-border);
+      padding: 10px 16px; display: flex; justify-content: space-between; align-items: center;
+    }
+    .brand { display: flex; align-items: center; gap: 8px; font-size: 0.9rem; font-weight: 600; font-family: 'JetBrains Mono', monospace; color: var(--text-main); }
+    .brand-badge { background: rgba(56, 189, 248, 0.12); color: var(--accent-cyan); border: 1px solid rgba(56, 189, 248, 0.25); font-size: 0.72rem; padding: 2px 6px; border-radius: 4px; }
+
+    .status-pill {
+      display: flex; align-items: center; gap: 6px;
+      background: #17181f; border: 1px solid var(--card-border);
+      padding: 4px 10px; border-radius: 6px; font-size: 0.75rem; font-family: 'JetBrains Mono', monospace;
+      color: var(--text-muted); cursor: pointer;
+    }
+    .status-dot { width: 7px; height: 7px; border-radius: 50%; background: #64748b; }
+    .status-dot.online { background: var(--accent-green); box-shadow: 0 0 8px rgba(16, 185, 129, 0.4); }
+    .status-dot.cloud { background: var(--accent-cyan); }
     .status-dot.offline { background: #ef4444; }
 
-    /* Контейнеры вкладок */
-    .tab-content { display: none; padding: 14px; max-width: 650px; margin: 0 auto; }
-    .tab-content.active { display: block; animation: fadeIn 0.2s ease-in-out; }
-    @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+    /* Контейнеры контента */
+    .tab-content { display: none; padding: 12px; max-width: 680px; margin: 0 auto; }
+    .tab-content.active { display: block; animation: fadeIn 0.15s ease-out; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: translateY(0); } }
 
-    /* Карточки в стиле Google Discover */
-    .card { background: #131c2e; border: 1px solid #1e293b; border-radius: 16px; padding: 16px; margin-bottom: 14px; box-shadow: 0 4px 20px rgba(0,0,0,0.25); }
-    .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-    .category-pill { font-size: 0.7rem; font-weight: 600; padding: 3px 8px; border-radius: 6px; background: rgba(56, 189, 248, 0.15); color: #38bdf8; text-transform: uppercase; }
-    .channel-name { font-size: 0.75rem; color: #94a3b8; }
-    .card-title { font-size: 1.05rem; font-weight: 600; line-height: 1.35; margin-bottom: 8px; color: #f8fafc; }
-    .card-body { font-size: 0.88rem; color: #cbd5e1; line-height: 1.45; margin-bottom: 12px; }
-    .card-footer { display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #1e293b; padding-top: 10px; }
-    .card-link { font-size: 0.8rem; color: #818cf8; text-decoration: none; font-weight: 500; }
-    .card-actions { display: flex; gap: 8px; }
-    .btn-action { background: #1e293b; border: 1px solid #334155; color: #f1f5f9; padding: 5px 10px; border-radius: 8px; cursor: pointer; font-size: 0.85rem; }
-    .btn-action:hover { background: #334155; }
+    /* Карточки в стиле задач Antigravity */
+    .card {
+      background: var(--card-bg); border: 1px solid var(--card-border);
+      border-radius: 10px; padding: 14px 16px; margin-bottom: 12px;
+      transition: border-color 0.15s ease;
+    }
+    .card:hover { border-color: #2e303b; }
+    .card-meta { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 0.75rem; }
+    .tag { font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; font-weight: 500; padding: 2px 6px; border-radius: 4px; background: rgba(245, 158, 11, 0.1); color: var(--accent-amber); border: 1px solid rgba(245, 158, 11, 0.2); }
+    .channel-tag { font-family: 'JetBrains Mono', monospace; color: var(--text-muted); font-size: 0.72rem; }
+    .card-title { font-size: 0.98rem; font-weight: 600; line-height: 1.4; color: var(--text-main); margin-bottom: 8px; }
+    .card-body { font-size: 0.86rem; color: #b4b6c2; line-height: 1.5; margin-bottom: 12px; }
+    .card-footer { display: flex; justify-content: space-between; align-items: center; border-top: 1px solid rgba(255, 255, 255, 0.05); padding-top: 10px; font-size: 0.8rem; }
+    .source-link { color: var(--accent-cyan); text-decoration: none; font-size: 0.78rem; font-family: 'JetBrains Mono', monospace; display: flex; align-items: center; gap: 4px; }
+    .source-link:hover { text-decoration: underline; }
 
-    /* Вкладка Чата */
-    .chat-container { display: flex; flex-direction: column; height: calc(100vh - 145px); }
-    .chat-header-bar { display: flex; justify-content: space-between; align-items: center; padding-bottom: 8px; margin-bottom: 8px; border-bottom: 1px solid #1e293b; font-size: 0.8rem; }
-    .model-selector { background: #1e293b; color: #f1f5f9; border: 1px solid #334155; border-radius: 8px; padding: 4px 8px; font-size: 0.75rem; outline: none; }
-    .chat-messages { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding-bottom: 10px; }
-    .bubble { max-width: 85%; padding: 12px 16px; border-radius: 18px; font-size: 0.92rem; line-height: 1.45; word-wrap: break-word; white-space: pre-wrap; }
-    .bubble.user { align-self: flex-end; background: #2563eb; color: #ffffff; border-bottom-right-radius: 4px; }
-    .bubble.bot { align-self: flex-start; background: #1e293b; color: #f1f5f9; border-bottom-left-radius: 4px; border: 1px solid #334155; }
-    .bubble.error { background: #451a1a; border-color: #ef4444; color: #fca5a5; }
-    .bubble.typing { font-style: italic; color: #94a3b8; }
-    .bubble-meta { font-size: 0.7rem; color: #94a3b8; margin-top: 6px; text-align: right; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 4px; }
-    .chat-input-bar { display: flex; gap: 8px; padding-top: 10px; border-top: 1px solid #1e293b; }
-    .chat-input { flex: 1; background: #131c2e; border: 1px solid #334155; border-radius: 24px; padding: 12px 18px; color: #fff; font-size: 0.95rem; outline: none; }
-    .chat-input:focus { border-color: #38bdf8; }
-    .chat-send { background: #2563eb; border: none; border-radius: 50%; width: 45px; height: 45px; color: #fff; font-weight: bold; cursor: pointer; display: flex; align-items: center; justify-content: center; }
-    .chat-send:active { transform: scale(0.95); }
+    .btn-group { display: flex; gap: 6px; }
+    .btn-icon { background: #1a1b22; border: 1px solid var(--card-border); color: var(--text-muted); padding: 4px 10px; border-radius: 6px; cursor: pointer; font-size: 0.8rem; transition: all 0.15s ease; }
+    .btn-icon:hover { background: #23252f; color: var(--text-main); border-color: #383a48; }
+
+    /* Вкладка Диалога (Чат) в стиле Antigravity */
+    .chat-layout { display: flex; flex-direction: column; height: calc(100vh - 135px); }
+    .agent-header {
+      background: #14151b; border: 1px solid var(--card-border);
+      border-radius: 8px; padding: 8px 12px; margin-bottom: 10px;
+      display: flex; justify-content: space-between; align-items: center;
+      font-size: 0.78rem; font-family: 'JetBrains Mono', monospace;
+    }
+    .select-model {
+      background: #1a1b22; border: 1px solid var(--card-border); color: var(--text-main);
+      padding: 4px 8px; border-radius: 6px; font-size: 0.75rem; font-family: 'JetBrains Mono', monospace; outline: none;
+    }
+
+    .chat-history { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding-right: 2px; }
+    .msg-box {
+      border-radius: 8px; padding: 12px 14px; font-size: 0.9rem; line-height: 1.5;
+      max-width: 90%; word-break: break-word; white-space: pre-wrap;
+    }
+    .msg-box.user {
+      align-self: flex-end; background: #182236; border: 1px solid #283754; color: #f0f4ff;
+    }
+    .msg-box.agent {
+      align-self: flex-start; background: #15161c; border: 1px solid var(--card-border); color: #e4e4e9;
+    }
+    .msg-box.agent-typing {
+      font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: var(--text-muted); border-style: dashed;
+    }
+    .msg-box.error {
+      background: #2b1417; border: 1px solid #632228; color: #fca5a5;
+    }
+    .msg-meta {
+      font-family: 'JetBrains Mono', monospace; font-size: 0.68rem; color: #717380;
+      margin-top: 6px; padding-top: 6px; border-top: 1px solid rgba(255, 255, 255, 0.05);
+      display: flex; justify-content: space-between;
+    }
+
+    /* Строка ввода терминала */
+    .input-box {
+      display: flex; gap: 8px; padding-top: 10px; border-top: 1px solid var(--card-border);
+    }
+    .terminal-input {
+      flex: 1; background: #14151b; border: 1px solid var(--card-border);
+      border-radius: 8px; padding: 10px 14px; color: var(--text-main);
+      font-size: 0.9rem; outline: none; transition: border-color 0.15s ease;
+    }
+    .terminal-input:focus { border-color: var(--accent-blue); }
+    .btn-send {
+      background: var(--accent-blue); border: none; border-radius: 8px;
+      padding: 0 16px; color: #fff; font-weight: 600; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: opacity 0.15s;
+    }
+    .btn-send:hover { opacity: 0.9; }
 
     /* Нижняя навигация */
-    nav { position: fixed; bottom: 0; left: 0; right: 0; height: 60px; background: rgba(15, 23, 42, 0.95); backdrop-filter: blur(14px); border-top: 1px solid #1e293b; display: flex; justify-content: space-around; align-items: center; z-index: 100; }
-    .nav-item { display: flex; flex-direction: column; align-items: center; gap: 4px; color: #64748b; font-size: 0.75rem; text-decoration: none; cursor: pointer; flex: 1; }
-    .nav-item.active { color: #38bdf8; font-weight: 600; }
-    .nav-icon { font-size: 1.25rem; }
+    nav {
+      position: fixed; bottom: 0; left: 0; right: 0; height: 56px;
+      background: rgba(13, 13, 17, 0.96); backdrop-filter: blur(14px);
+      border-top: 1px solid var(--card-border);
+      display: flex; justify-content: space-around; align-items: center; z-index: 100;
+    }
+    .nav-btn {
+      display: flex; flex-direction: column; align-items: center; gap: 3px;
+      color: #616370; font-size: 0.72rem; font-family: 'JetBrains Mono', monospace;
+      text-decoration: none; cursor: pointer; flex: 1; padding: 6px 0;
+      transition: color 0.15s;
+    }
+    .nav-btn.active { color: var(--accent-cyan); font-weight: 500; }
+    .nav-btn.active::after {
+      content: ''; width: 4px; height: 4px; border-radius: 50%;
+      background: var(--accent-cyan); margin-top: 2px;
+    }
+    .nav-icon { font-size: 1.15rem; }
   </style>
 </head>
 <body>
 
+  <!-- ВЕРХНИЙ ХЕДЕР В СТИЛЕ ANTIGRAVITY -->
   <header>
-    <div class="logo">⚡️ AI News Discover</div>
-    <div class="status-badge" id="statusBadge" onclick="loadStatus()">
+    <div class="brand">
+      <span>ANTIGRAVITY</span>
+      <span class="brand-badge">// HUB</span>
+    </div>
+    <div class="status-pill" id="statusPill" onclick="fetchStatus()">
       <div class="status-dot" id="statusDot"></div>
-      <span id="statusText">Подключение...</span>
+      <span id="statusLabel">SYNCING...</span>
     </div>
   </header>
 
-  <!-- ВКЛАДКА 1: GOOGLE DISCOVER FEED -->
-  <main class="tab-content active" id="tabFeed">
-    <div id="feedList">
-      <p style="text-align:center; color:#64748b; margin-top:40px;">Загрузка свежих публикаций...</p>
+  <!-- ВКЛАДКА 1: НОВОСТИ (DISCOVER) -->
+  <main class="tab-content active" id="tabDiscover">
+    <div id="newsFeedList">
+      <div class="card" style="text-align: center; color: var(--text-muted); padding: 30px 10px;">
+        <span class="mono">Загрузка свежих публикаций...</span>
+      </div>
     </div>
   </main>
 
-  <!-- ВКЛАДКА 2: ИИ ЧАТ -->
-  <main class="tab-content" id="tabChat">
-    <div class="chat-container">
-      <div class="chat-header-bar">
-        <span>Активная нейросеть:</span>
-        <select class="model-selector" id="modelSelect">
-          <option value="auto">🔄 Auto (Локальный ➔ Резерв)</option>
-          <option value="local">🖥 Локальный ПК (LM Studio / Qwen 2.5)</option>
-          <option value="gemini">🌐 Google Gemini 3.5 Flash</option>
+  <!-- ВКЛАДКА 2: ДИАЛОГ С ИИ -->
+  <main class="tab-content" id="tabTerminalChat">
+    <div class="chat-layout">
+      <div class="agent-header">
+        <span class="mono">AGENT WORKSPACE:</span>
+        <select class="select-model" id="agentModelSelect">
+          <option value="auto">🔄 Auto (Failover)</option>
+          <option value="local">🖥 LM Studio (Local Qwen 2.5)</option>
+          <option value="gemini">🌐 Gemini 3.5 Flash</option>
           <option value="groq">⚡️ Groq Llama 3.3 70B</option>
           <option value="openrouter">🔀 OpenRouter Free</option>
         </select>
       </div>
-      <div class="chat-messages" id="chatMessages">
-        <div class="bubble bot">
-          👋 Привет! Я твой персональный ИИ-ассистент. Я знаю свежие новости за сегодня и готов ответить на любые вопросы!
+
+      <div class="chat-history" id="chatFeed">
+        <div class="msg-box agent">
+          👋 <b>Привет!</b> Я готов обрабатывать запросы и отвечать по содержанию последних новостей.
+          <div class="msg-meta">
+            <span>ANTIGRAVITY AGENT</span>
+            <span>READY</span>
+          </div>
         </div>
       </div>
-      <div class="chat-input-bar">
-        <input type="text" class="chat-input" id="chatInput" placeholder="Спросите о новости или задайте задачу...">
-        <button class="chat-send" id="chatSend">➤</button>
+
+      <div class="input-box">
+        <input type="text" class="terminal-input" id="terminalPrompt" placeholder="Введите команду или вопрос агенту...">
+        <button class="btn-send" id="btnTerminalSend">➔</button>
       </div>
     </div>
   </main>
 
-  <!-- ВКЛАДКА 3: ДАЙДЖЕСТ -->
-  <main class="tab-content" id="tabDigest">
+  <!-- ВКЛАДКА 3: ДАЙДЖЕСТ 08:50 -->
+  <main class="tab-content" id="tabSummary">
     <div class="card">
-      <div class="card-header">
-        <span class="category-pill">08:50 ДАЙДЖЕСТ</span>
-        <button class="btn-action" onclick="refreshDigestNow()">⚡️ Запустить сбор</button>
+      <div class="card-meta">
+        <span class="tag">08:50 RECAP</span>
+        <button class="btn-icon" onclick="triggerDigestRefresh()">⚡️ Сгенерировать сейчас</button>
       </div>
-      <div id="digestBody" style="line-height:1.6; font-size:0.95rem; white-space: pre-wrap; margin-top:10px;">
+      <div id="digestContent" style="line-height: 1.6; font-size: 0.92rem; white-space: pre-wrap; color: #d0d2dd;">
         Загрузка последнего дайджеста...
       </div>
     </div>
   </main>
 
-  <!-- Нижняя панель навигации Android -->
+  <!-- НИЖНЯЯ ПАНЕЛЬ НАВИГАЦИИ -->
   <nav>
-    <div class="nav-item active" onclick="switchTab('tabFeed', this)">
-      <div class="nav-icon">📰</div>
-      <div>Новости</div>
+    <div class="nav-btn active" onclick="navigate('tabDiscover', this)">
+      <div class="nav-icon">⚡️</div>
+      <div>DISCOVER</div>
     </div>
-    <div class="nav-item" onclick="switchTab('tabChat', this)">
+    <div class="nav-btn" onclick="navigate('tabTerminalChat', this)">
       <div class="nav-icon">💬</div>
-      <div>ИИ Чат</div>
+      <div>TERMINAL</div>
     </div>
-    <div class="nav-item" onclick="switchTab('tabDigest', this)">
-      <div class="nav-icon">☀️</div>
-      <div>Сводка</div>
+    <div class="nav-btn" onclick="navigate('tabSummary', this)">
+      <div class="nav-icon">📂</div>
+      <div>DIGEST</div>
     </div>
   </nav>
 
   <script>
-    function switchTab(tabId, el) {
+    function navigate(tabId, elem) {
       document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-      document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+      document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
       document.getElementById(tabId).classList.add('active');
-      el.classList.add('active');
+      elem.classList.add('active');
 
-      if (tabId === 'tabDigest') loadDigest();
-      if (tabId === 'tabFeed') loadFeed();
+      if (tabId === 'tabSummary') loadDigestData();
+      if (tabId === 'tabDiscover') loadNewsData();
     }
 
-    async function loadStatus() {
+    async function fetchStatus() {
+      const dot = document.getElementById('statusDot');
+      const label = document.getElementById('statusLabel');
       try {
-        const r = await fetch('/api/status');
-        const d = await r.json();
-        const dot = document.getElementById('statusDot');
-        const txt = document.getElementById('statusText');
+        const res = await fetch('/api/status');
+        const data = await res.json();
         dot.className = 'status-dot';
 
-        if (d.local_pc_online) {
+        if (data.local_pc_online) {
           dot.classList.add('online');
-          txt.innerText = 'ПК (Qwen 2.5)';
+          label.innerText = 'LM STUDIO (LOCAL)';
         } else {
           dot.classList.add('cloud');
-          txt.innerText = d.active_provider.toUpperCase();
+          label.innerText = (data.active_provider || 'CLOUD').toUpperCase();
         }
-      } catch (e) {
-        const dot = document.getElementById('statusDot');
+      } catch (err) {
         dot.className = 'status-dot offline';
-        document.getElementById('statusText').innerText = 'Сервер офлайн';
+        label.innerText = 'SERVER OFFLINE';
       }
     }
 
-    async function loadFeed() {
+    async function loadNewsData() {
+      const container = document.getElementById('newsFeedList');
       try {
-        const r = await fetch('/api/feed');
-        const data = await r.json();
-        const container = document.getElementById('feedList');
+        const res = await fetch('/api/feed');
+        const data = await res.json();
         if (!data.items || data.items.length === 0) {
           container.innerHTML = `
-            <div style="text-align:center; padding: 40px 10px;">
-              <p style="color:#94a3b8; margin-bottom:14px;">📭 Лента пуста. Новости еще не собраны.</p>
-              <button class="btn-action" style="padding:8px 16px;" onclick="refreshDigestNow()">⚡️ Запустить сбор новостей</button>
+            <div class="card" style="text-align:center; padding: 35px 15px;">
+              <p class="mono" style="color:var(--text-muted); margin-bottom:12px;">📭 Лента пуста. Новости еще не собраны.</p>
+              <button class="btn-icon" style="padding:6px 14px;" onclick="triggerDigestRefresh()">⚡️ Запустить сбор публикаций</button>
             </div>
           `;
           return;
         }
-        container.innerHTML = data.items.map(item => `
+
+        container.innerHTML = data.items.map(it => `
           <div class="card">
-            <div class="card-header">
-              <span class="category-pill">${item.category || 'Общее'}</span>
-              <span class="channel-name">${item.channel || ''}</span>
+            <div class="card-meta">
+              <span class="tag">[${(it.category || 'NEWS').toUpperCase()}]</span>
+              <span class="channel-tag">${it.channel || ''}</span>
             </div>
-            <div class="card-title">${item.title || ''}</div>
-            <div class="card-body">${(item.content || '').substring(0, 240)}...</div>
+            <div class="card-title">${escapeHtml(it.title || '')}</div>
+            <div class="card-body">${escapeHtml((it.content || '').substring(0, 260))}...</div>
             <div class="card-footer">
-              <a href="${item.url}" target="_blank" class="card-link">Открыть оригинал →</a>
-              <div class="card-actions">
-                <button class="btn-action" onclick="sendFeedback('like', '${encodeURIComponent(item.title)}')">👍</button>
-                <button class="btn-action" onclick="sendFeedback('dislike', '${encodeURIComponent(item.title)}')">👎</button>
+              <a href="${it.url}" target="_blank" class="source-link">ORIGINAL SOURCE ➔</a>
+              <div class="btn-group">
+                <button class="btn-icon" title="Сохранить в предпочтения" onclick="postReaction('like', '${encodeURIComponent(it.title)}')">👍</button>
+                <button class="btn-icon" title="Меньше такого" onclick="postReaction('dislike', '${encodeURIComponent(it.title)}')">👎</button>
               </div>
             </div>
           </div>
         `).join('');
       } catch (e) {
-        console.error(e);
+        container.innerHTML = '<div class="card" style="color:#ef4444;">Ошибка загрузки ленты.</div>';
       }
     }
 
-    async function loadDigest() {
+    async function loadDigestData() {
+      const box = document.getElementById('digestContent');
       try {
-        const r = await fetch('/api/digest/latest');
-        const d = await r.json();
-        document.getElementById('digestBody').innerText = d.digest;
+        const res = await fetch('/api/digest/latest');
+        const data = await res.json();
+        box.innerText = data.digest || 'Сводка еще не формировалась.';
       } catch (e) {
-        document.getElementById('digestBody').innerText = 'Не удалось загрузить дайджест.';
+        box.innerText = 'Не удалось загрузить последний дайджест.';
       }
     }
 
-    async function refreshDigestNow() {
-      const body = document.getElementById('digestBody');
-      body.innerText = '⏳ Идет сбор новостей и генерация сводки через ИИ...';
+    async function triggerDigestRefresh() {
+      const box = document.getElementById('digestContent');
+      box.innerText = '⏳ [EXECUTING AGENT WORKFLOW] Сбор публикаций и аналитический синтез...';
       try {
-        const r = await fetch('/api/digest/refresh', { method: 'POST' });
-        const d = await r.json();
-        body.innerText = d.text;
-        loadFeed();
+        const res = await fetch('/api/digest/refresh', { method: 'POST' });
+        const d = await res.json();
+        box.innerText = d.text || 'Готово.';
+        loadNewsData();
       } catch (e) {
-        body.innerText = '⚠️ Ошибка запуска сбора.';
+        box.innerText = '⚠️ Ошибка выполнения сбора новостей.';
       }
     }
 
-    async function sendFeedback(reaction, encodedTitle) {
+    async function postReaction(reaction, encodedTitle) {
       const title = decodeURIComponent(encodedTitle);
       try {
         await fetch('/api/feedback', {
@@ -234,27 +334,26 @@
         });
         alert(reaction === 'like' ? '👍 Сохранено в предпочтения' : '👎 Учтено!');
       } catch (e) {
-        alert('Ошибка отправки реакции');
+        alert('Ошибка связи с сервером');
       }
     }
 
-    async function sendMessage() {
-      const input = document.getElementById('chatInput');
+    async function sendPrompt() {
+      const input = document.getElementById('terminalPrompt');
       const text = input.value.trim();
       if (!text) return;
 
-      const msgs = document.getElementById('chatMessages');
-      msgs.innerHTML += `<div class="bubble user">${escapeHtml(text)}</div>`;
+      const history = document.getElementById('chatFeed');
+      history.innerHTML += `<div class="msg-box user">${escapeHtml(text)}</div>`;
       input.value = '';
 
-      // Создаем временный пузырь с анимацией ожидания
-      const loadingBubble = document.createElement('div');
-      loadingBubble.className = 'bubble bot typing';
-      loadingBubble.innerText = '⏳ Нейросеть генерирует ответ...';
-      msgs.appendChild(loadingBubble);
-      msgs.scrollTop = msgs.scrollHeight;
+      const typingBox = document.createElement('div');
+      typingBox.className = 'msg-box agent agent-typing';
+      typingBox.innerText = '⏳ [PROCESSING REQUEST...] Обработка...';
+      history.appendChild(typingBox);
+      history.scrollTop = history.scrollHeight;
 
-      const selectedProvider = document.getElementById('modelSelect').value;
+      const selectedProvider = document.getElementById('agentModelSelect').value;
 
       try {
         const payload = { message: text };
@@ -262,54 +361,49 @@
           payload.provider = selectedProvider;
         }
 
-        const r = await fetch('/api/chat', {
+        const res = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         });
 
-        if (!r.ok) {
-          throw new Error(`HTTP ${r.status}`);
-        }
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-        const res = await r.json();
-        loadingBubble.classList.remove('typing');
+        const result = await res.json();
+        typingBox.classList.remove('agent-typing');
 
-        if (!res.success) {
-          loadingBubble.classList.add('error');
-          loadingBubble.innerText = `⚠️ ${res.content || 'Не удалось получить ответ от LLM'}`;
+        if (!result.success) {
+          typingBox.classList.add('error');
+          typingBox.innerHTML = `⚠️ <b>FAILED:</b> ${escapeHtml(result.content || 'LLM Execution Error')}`;
           return;
         }
 
-        const prov = (res.provider || 'AI').toUpperCase();
-        const model = res.model || '';
-        const latency = res.latency ? ` • ${res.latency}с` : '';
-
-        loadingBubble.innerText = res.content || '';
+        typingBox.innerText = result.content || '';
         const metaDiv = document.createElement('div');
-        metaDiv.className = 'bubble-meta';
-        metaDiv.innerText = `🤖 ${prov} (${model})${latency}`;
-        loadingBubble.appendChild(metaDiv);
-        msgs.scrollTop = msgs.scrollHeight;
+        metaDiv.className = 'msg-meta';
+        const prov = (result.provider || 'AGENT').toUpperCase();
+        metaDiv.innerHTML = `<span>AGENT: ${prov} [${result.model || ''}]</span><span>${result.latency}s</span>`;
+        typingBox.appendChild(metaDiv);
+        history.scrollTop = history.scrollHeight;
 
-      } catch (e) {
-        loadingBubble.classList.remove('typing');
-        loadingBubble.classList.add('error');
-        loadingBubble.innerText = `⚠️ Ошибка: ${e.message}. Убедитесь, что сервер запущен или проверьте ключи в .env.`;
+      } catch (err) {
+        typingBox.classList.remove('agent-typing');
+        typingBox.classList.add('error');
+        typingBox.innerText = `⚠️ Connection error: ${err.message}. Проверьте LM Studio или ключи в .env.`;
       }
     }
 
-    function escapeHtml(string) {
-      const div = document.createElement('div');
-      div.innerText = string;
-      return div.innerHTML;
+    function escapeHtml(str) {
+      const d = document.createElement('div');
+      d.innerText = str;
+      return d.innerHTML;
     }
 
-    document.getElementById('chatSend').onclick = sendMessage;
-    document.getElementById('chatInput').onkeypress = (e) => { if (e.key === 'Enter') sendMessage(); };
+    document.getElementById('btnTerminalSend').onclick = sendPrompt;
+    document.getElementById('terminalPrompt').onkeypress = (e) => { if (e.key === 'Enter') sendPrompt(); };
 
-    loadStatus();
-    loadFeed();
+    fetchStatus();
+    loadNewsData();
   </script>
 </body>
 </html>
