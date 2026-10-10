@@ -1,11 +1,20 @@
 import logging
+import os
+from pathlib import Path
+from datetime import datetime
 from aiogram import Router, F
 from aiogram.filters import Command
-from aiogram.types import Message, CallbackQuery, MessageReactionUpdated
+from aiogram.types import (
+    Message,
+    CallbackQuery,
+    MessageReactionUpdated,
+    FSInputFile,
+    LinkPreviewOptions
+)
 from aiogram.exceptions import TelegramBadRequest
 
 from src.llm.router import LLMRouter
-from src.llm.prompts import clean_telegram_markdown
+from src.llm.prompts import markdown_to_telegram_html
 from src.pipeline.digest_builder import DigestBuilder
 from src.pipeline.storage import Storage
 from src.bot.keyboards import (
@@ -26,16 +35,52 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
     def is_admin(user_id: int) -> bool:
         return admin_id == 0 or user_id == admin_id
 
+    def get_web_app_url() -> str | None:
+        return os.getenv("WEB_APP_URL") or "http://192.168.0.169:8000"
+
     async def safe_edit_text(call: CallbackQuery, text: str, reply_markup=None):
         try:
-            await call.message.edit_text(clean_telegram_markdown(text), parse_mode="Markdown", reply_markup=reply_markup)
+            html_text = markdown_to_telegram_html(text)
+            await call.message.edit_text(html_text, parse_mode="HTML", reply_markup=reply_markup)
         except TelegramBadRequest as e:
             if "message is not modified" in str(e).lower():
                 pass
             else:
-                logger.warning(f"Ошибка редактирования сообщения: {e}")
+                logger.warning(f"Ошибка редактирования сообщения HTML: {e}, попытка без разметки...")
+                try:
+                    await call.message.edit_text(text, reply_markup=reply_markup)
+                except Exception:
+                    pass
         except Exception as e:
             logger.warning(f"Ошибка при edit_text: {e}")
+
+    async def send_safe_reply(msg: Message, text: str, reply_markup=None, link_preview_options: LinkPreviewOptions = None):
+        html_text = markdown_to_telegram_html(text)
+        try:
+            if len(html_text) > 4000:
+                for x in range(0, len(html_text), 4000):
+                    await msg.answer(html_text[x:x+4000], parse_mode="HTML")
+                if reply_markup:
+                    await msg.answer("💬 <b>Управление:</b>", parse_mode="HTML", reply_markup=reply_markup)
+            else:
+                await msg.answer(
+                    html_text,
+                    parse_mode="HTML",
+                    reply_markup=reply_markup,
+                    link_preview_options=link_preview_options
+                )
+        except TelegramBadRequest as e:
+            logger.warning(f"Telegram HTML parse error ({e}), retrying as plain text...")
+            if len(text) > 4000:
+                for x in range(0, len(text), 4000):
+                    await msg.answer(text[x:x+4000])
+                if reply_markup:
+                    await msg.answer("💬 Управление:", reply_markup=reply_markup)
+            else:
+                await msg.answer(text, reply_markup=reply_markup)
+        except Exception as e:
+            logger.error(f"Failed to send message: {e}")
+            await msg.answer(f"⚠️ Ошибка отправки: {e}")
 
     # --------------------------------------------------------------------------
     # Главное меню (Команда /start или кнопка "Главное меню")
@@ -56,7 +101,7 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
         next_run = scheduler.get_next_run_time() if scheduler else "08:50"
 
         text = (
-            f"👋 *Привет! Я твой автономный ИИ-хаб.*\n\n"
+            f"👋 *Привет! Я твой автономный ИИ-хаб (2026).*\n\n"
             f"💻 *Ноутбук-сервер:* 🟢 24/7 Активен\n"
             f"🖥 *Основной ПК (LM Studio):* {local_status}\n"
             f"🧠 *Активный провайдер:* `{active_prov.upper()}`\n"
@@ -66,8 +111,7 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
             f"💬 *Режим чата:* {'🟢 ВКЛЮЧЕН' if chat_active else '⚪️ Выключен'}\n\n"
             f"Используйте кнопки ниже для управления:"
         )
-        await msg.answer(clean_telegram_markdown(text), parse_mode="Markdown", reply_markup=get_main_menu_keyboard(chat_active))
-        await msg.answer(clean_telegram_markdown(text), parse_mode="Markdown", reply_markup=get_main_menu_keyboard(chat_active))
+        await send_safe_reply(msg, text, reply_markup=get_main_menu_keyboard(chat_active, get_web_app_url()))
 
     @r.callback_query(F.data == "btn_menu")
     async def cb_main_menu(call: CallbackQuery):
@@ -85,7 +129,7 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
             f"⏰ *Таймер сводки:* `08:50`\n"
             f"💬 *Режим чата:* {'🟢 ВКЛЮЧЕН' if chat_active else '⚪️ Выключен'}"
         )
-        await safe_edit_text(call, text, get_main_menu_keyboard(chat_active))
+        await safe_edit_text(call, text, get_main_menu_keyboard(chat_active, get_web_app_url()))
 
     # --------------------------------------------------------------------------
     # Управление режимом диалога (Включение / Выход / Очистка контекста)
@@ -100,15 +144,15 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
         text = (
             f"💬 *Режим диалога с ИИ активирован!*\n\n"
             f"Нейросеть: *{active_prov.upper()}* (`{active_model}`).\n\n"
-            f"• Модель знает текущую дату, время и содержание последнего дайджеста новостей.\n"
-            f"• Просто пишите сообщения сюда. Чтобы завершить диалог, нажмите кнопку ниже или введите /exit."
+            f"• Модель знает текущую дату (2026 год) и контекст последних собранных новостей.\n"
+            f"• Просто пишите сообщения в чат. Чтобы завершить диалог, нажмите кнопку ниже или введите /exit."
         )
 
         if isinstance(event, CallbackQuery):
             await event.answer("Режим диалога включен")
             await safe_edit_text(event, text, get_chat_control_keyboard())
         else:
-            await event.answer(clean_telegram_markdown(text), parse_mode="Markdown", reply_markup=get_chat_control_keyboard())
+            await send_safe_reply(event, text, reply_markup=get_chat_control_keyboard())
 
     @r.message(Command("exit"))
     @r.callback_query(F.data == "btn_chat_stop")
@@ -116,13 +160,13 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
         storage.set_chat_mode(False)
         text = (
             f"🔴 *Режим диалога завершен.*\n\n"
-            f"Вы вернулись в стандартный режим. Сообщения не будут отправляться в LLM, пока вы снова не включите чат."
+            f"Вы вернулись в стандартный режим. Сообщения не будут пересылаться в LLM, пока вы снова не активируете чат."
         )
         if isinstance(event, CallbackQuery):
-            await event.answer("Режим диалога отключен")
-            await safe_edit_text(event, text, get_main_menu_keyboard(chat_mode=False))
+            await event.answer("Режим диалога выключен")
+            await safe_edit_text(event, text, get_main_menu_keyboard(chat_mode=False, web_app_url=get_web_app_url()))
         else:
-            await event.answer(clean_telegram_markdown(text), parse_mode="Markdown", reply_markup=get_main_menu_keyboard(chat_mode=False))
+            await send_safe_reply(event, text, reply_markup=get_main_menu_keyboard(chat_mode=False, web_app_url=get_web_app_url()))
 
     @r.callback_query(F.data == "btn_chat_clear")
     async def cb_chat_clear(call: CallbackQuery):
@@ -130,30 +174,74 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
         await call.answer("🧹 Память диалога очищена!", show_alert=True)
 
     # --------------------------------------------------------------------------
-    # Ручной запуск дайджеста (Создает новое сообщение со сводкой)
+    # Ручной запуск дайджеста (Создает нативный сворачиваемый пост + файл)
     # --------------------------------------------------------------------------
     @r.message(Command("digest"))
     @r.callback_query(F.data == "btn_run_digest")
     async def cmd_digest(event: Message | CallbackQuery):
         msg = event if isinstance(event, Message) else event.message
         if isinstance(event, CallbackQuery):
-            await event.answer("Сбор публикаций и запуск ИИ...")
+            await event.answer("Сбор публикаций и генерация дайджеста...")
 
-        wait_msg = await msg.answer("⏳ *Идет сбор свежих новостей и структурирование через ИИ...*", parse_mode="Markdown")
+        wait_msg = await msg.answer("⏳ <i>Идет сбор новостей и формирование аналитического отчета...</i>", parse_mode="HTML")
 
         res = await digest_builder.generate_digest()
-        await wait_msg.delete()
+        try:
+            await wait_msg.delete()
+        except Exception:
+            pass
 
-        # Очищаем Markdown от возможных решеток ###
-        text = clean_telegram_markdown(res["text"])
+        if not res.get("success"):
+            await send_safe_reply(msg, f"⚠️ {res.get('text')}")
+            return
 
-        # Отправляем дайджест с кнопками оценки (👍 / 👎)
-        if len(text) > 4000:
-            for x in range(0, len(text), 4000):
-                await msg.answer(text[x:x+4000], parse_mode="Markdown")
-            await msg.answer("👆 *Оцените подборку для обучения рекомендаций:*", parse_mode="Markdown", reply_markup=get_digest_feedback_keyboard())
+        post_html = res.get("telegram_post_html") or res.get("text")
+        lead_img = res.get("lead_image_url")
+        html_path = res.get("full_report_html_path")
+        md_path = res.get("full_report_md_path")
+        md_file_id = Path(md_path).name if md_path else None
+
+        # Кнопки под постом: Оценка, Чат, Окно в TG, Скачать MD
+        kb = get_digest_feedback_keyboard(web_app_url=get_web_app_url(), md_file_id=md_file_id)
+
+        # 1. Отправляем визуальный Telegram-пост со сворачиваемыми блоками и фото
+        preview_options = None
+        if lead_img and lead_img.startswith("http"):
+            preview_options = LinkPreviewOptions(
+                url=lead_img,
+                prefer_large_media=True,
+                show_above_text=True
+            )
+
+        await send_safe_reply(msg, post_html, reply_markup=kb, link_preview_options=preview_options)
+
+        # 2. Отправляем полноценный HTML-документ прямо в Telegram
+        if html_path and os.path.exists(html_path):
+            today_str = datetime.now().strftime("%d.%m.%Y")
+            doc = FSInputFile(html_path, filename=f"Digest_{today_str}.html")
+            await msg.answer_document(
+                document=doc,
+                caption="📑 <b>Полный аналитический отчет со всеми таблицами</b>\n<i>Нажмите на файл — откроется прямо внутри Telegram.</i>",
+                parse_mode="HTML"
+            )
+
+    # --------------------------------------------------------------------------
+    # Скачивание исходного Markdown файла дайджеста
+    # --------------------------------------------------------------------------
+    @r.callback_query(F.data.startswith("getmd__"))
+    async def cb_download_md(call: CallbackQuery):
+        md_filename = call.data.replace("getmd__", "")
+        md_file_path = Path("data/digests") / md_filename
+        if md_file_path.exists():
+            await call.answer("Отправка файла...")
+            doc = FSInputFile(str(md_file_path), filename=md_filename)
+            await call.message.answer_document(
+                document=doc,
+                caption="📄 <b>Исходный Markdown-файл дайджеста</b>",
+                parse_mode="HTML"
+            )
         else:
-            await msg.answer(text, parse_mode="Markdown", reply_markup=get_digest_feedback_keyboard())
+            await call.answer("Файл не найден на сервере", show_alert=True)
 
     # --------------------------------------------------------------------------
     # Оценка дайджеста (Обратная связь и обучение предпочтений)
@@ -164,7 +252,7 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
         context_snippet = call.message.text[:250] if call.message.text else "Дайджест"
         storage.record_feedback("like" if is_like else "dislike", context_snippet)
 
-        alert_msg = "👍 Зафиксировано! Ваши предпочтения сохранены в user_learned_preferences.txt и учтутся завтра." if is_like else "👎 Учтено! Снизим приоритет подобных тем в будущих сводках."
+        alert_msg = "👍 Зафиксировано! Сохранено в user_learned_preferences.txt и учтется завтра." if is_like else "👎 Учтено! Снизим приоритет подобных тем в будущих сводках."
         await call.answer(alert_msg, show_alert=True)
 
     @r.message_reaction()
@@ -180,7 +268,7 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
         logger.info(f"Зафиксирована нативная реакция пользователя: {emoji}")
 
     # --------------------------------------------------------------------------
-    # Выбор провайдеров и моделей (РЕШЕНИЕ ПРОБЛЕМЫ: редактирование на месте!)
+    # Выбор провайдеров и моделей (редактирование на месте)
     # --------------------------------------------------------------------------
     @r.message(Command("model"))
     @r.callback_query(F.data == "btn_select_provider")
@@ -192,7 +280,7 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
             await event.answer()
             await safe_edit_text(event, text, kb)
         else:
-            await event.answer(clean_telegram_markdown(text), parse_mode="Markdown", reply_markup=kb)
+            await send_safe_reply(event, text, reply_markup=kb)
 
     @r.callback_query(F.data.startswith("prov_"))
     async def on_provider_selected(call: CallbackQuery):
@@ -246,7 +334,7 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
             f"1. 💻 *Ноутбук (Сервер 24/7):* 🟢 В сети\n"
             f"   - Планировщик: `08:50 ({tz_name})`\n"
             f"   - Следующая сводка: `{next_run}`\n"
-            f"   - База дедупликации SQLite: OK\n\n"
+            f"   - База SQLite: OK\n\n"
             f"2. 🖥 *Основной ПК (LM Studio + Qwen 2.5):*\n"
             f"   - Статус сервера LM Studio: {'🟢 Доступен (порт 1234)' if local_on else '⚪️ Не отвечает (офлайн/сон)'}\n"
             f"   - Адрес: `{llm_router.config.local.base_url}`\n\n"
@@ -258,9 +346,9 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
         )
         if isinstance(event, CallbackQuery):
             await event.answer()
-            await safe_edit_text(event, text, get_main_menu_keyboard(storage.is_chat_mode_active()))
+            await safe_edit_text(event, text, get_main_menu_keyboard(storage.is_chat_mode_active(), get_web_app_url()))
         else:
-            await event.answer(clean_telegram_markdown(text), parse_mode="Markdown", reply_markup=get_main_menu_keyboard(storage.is_chat_mode_active()))
+            await send_safe_reply(event, text, reply_markup=get_main_menu_keyboard(storage.is_chat_mode_active(), get_web_app_url()))
 
     @r.message(Command("sources"))
     @r.callback_query(F.data == "btn_sources")
@@ -276,13 +364,13 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
             f"📡 *Подключенные источники для дайджеста:*\n\n"
             f"📢 *Telegram-каналы:*\n{tg_list}\n\n"
             f"📰 *RSS-ленты:*\n{rss_list}\n\n"
-            f"_Чтобы добавить канал, просто впишите его в config/sources.yaml на ноутбуке._"
+            f"_Чтобы добавить канал, просто впишите его в config/sources.yaml на сервере._"
         )
         if isinstance(event, CallbackQuery):
             await event.answer()
-            await safe_edit_text(event, text, get_main_menu_keyboard(storage.is_chat_mode_active()))
+            await safe_edit_text(event, text, get_main_menu_keyboard(storage.is_chat_mode_active(), get_web_app_url()))
         else:
-            await event.answer(clean_telegram_markdown(text), parse_mode="Markdown", reply_markup=get_main_menu_keyboard(storage.is_chat_mode_active()))
+            await send_safe_reply(event, text, reply_markup=get_main_menu_keyboard(storage.is_chat_mode_active(), get_web_app_url()))
 
     # --------------------------------------------------------------------------
     # Ручная установка любой модели: /setmodel <provider> <model_slug>
@@ -299,46 +387,23 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
                 "`/setmodel <провайдер> <название_модели>`\n\n"
                 "Примеры:\n"
                 "• `/setmodel openrouter qwen/qwen-2.5-72b-instruct:free`\n"
-                "• `/setmodel gemini gemini-1.5-flash`\n"
+                "• `/setmodel gemini gemini-2.0-flash`\n"
                 "• `/setmodel groq llama-3.3-70b-versatile`\n"
                 "• `/setmodel local qwen2.5-7b-instruct`"
             )
-            await msg.answer(clean_telegram_markdown(text), parse_mode="Markdown")
+            await send_safe_reply(msg, text)
             return
 
         provider = parts[1].lower()
         model_name = parts[2]
 
         if provider not in ["local", "groq", "gemini", "openrouter"]:
-            await msg.answer("❌ Допустимые провайдеры: `local`, `groq`, `gemini`, `openrouter`", parse_mode="Markdown")
+            await send_safe_reply(msg, "❌ Допустимые провайдеры: `local`, `groq`, `gemini`, `openrouter`")
             return
 
         llm_router.set_model(provider, model_name)
         storage.set_setting(f"model_{provider}", model_name)
-        await msg.answer(f"✅ Для провайдера *{provider.upper()}* установлена модель:\n`{model_name}`", parse_mode="Markdown")
-
-    async def send_safe_reply(msg: Message, text: str, reply_markup=None):
-        cleaned = clean_telegram_markdown(text)
-        try:
-            if len(cleaned) > 4000:
-                for x in range(0, len(cleaned), 4000):
-                    await msg.answer(cleaned[x:x+4000], parse_mode="Markdown")
-                if reply_markup:
-                    await msg.answer("💬 *Управление диалогом:*", parse_mode="Markdown", reply_markup=reply_markup)
-            else:
-                await msg.answer(cleaned, parse_mode="Markdown", reply_markup=reply_markup)
-        except TelegramBadRequest as e:
-            logger.warning(f"Telegram parse error ({e}), retrying as plain text...")
-            if len(text) > 4000:
-                for x in range(0, len(text), 4000):
-                    await msg.answer(text[x:x+4000])
-                if reply_markup:
-                    await msg.answer("💬 Управление диалогом:", reply_markup=reply_markup)
-            else:
-                await msg.answer(text, reply_markup=reply_markup)
-        except Exception as e:
-            logger.error(f"Failed to send message: {e}")
-            await msg.answer(f"⚠️ Ошибка отправки: {e}")
+        await send_safe_reply(msg, f"✅ Для провайдера *{provider.upper()}* установлена модель:\n`{model_name}`")
 
     # --------------------------------------------------------------------------
     # ПРЯМОЙ ЧАТ С ИИ
@@ -354,17 +419,16 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
                 f"💡 *Режим диалога сейчас выключен.*\n\n"
                 f"Чтобы задать вопрос ИИ или обсудить свежие новости, нажмите кнопку ниже или введите /chat."
             )
-            await msg.answer(clean_telegram_markdown(text), parse_mode="Markdown", reply_markup=get_main_menu_keyboard(chat_mode=False))
+            await send_safe_reply(msg, text, reply_markup=get_main_menu_keyboard(chat_mode=False, web_app_url=get_web_app_url()))
             return
 
         await msg.bot.send_chat_action(msg.chat.id, "typing")
         user_query = msg.text
 
-        # Извлекаем последние реплики и свежий дайджест
+        # Извлекаем контекст: история, последний дайджест, свежие новости
         history = storage.get_chat_history(limit=6)
         latest_digest = storage.get_latest_digest()
 
-        # Формируем контекст последних новостей из базы
         recent_items = storage.get_news_feed(limit=10)
         recent_news_str = ""
         if recent_items:

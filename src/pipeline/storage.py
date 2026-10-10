@@ -66,10 +66,30 @@ class Storage:
                     title TEXT,
                     content TEXT,
                     url TEXT,
+                    image_url TEXT,
                     published_at TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
+
+                CREATE TABLE IF NOT EXISTS full_digests (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    date_str TEXT,
+                    provider_used TEXT,
+                    model_used TEXT,
+                    post_html TEXT,
+                    report_md TEXT,
+                    report_html_path TEXT,
+                    report_md_path TEXT,
+                    lead_image_url TEXT
+                );
             """)
+
+            # Безопасное добавление колонок для существующих БД
+            try:
+                conn.execute("ALTER TABLE news_feed ADD COLUMN image_url TEXT")
+            except sqlite3.OperationalError:
+                pass
 
     def _hash_item(self, item: Dict[str, Any]) -> str:
         unique_key = item.get("guid") or item.get("url") or item.get("title", "")
@@ -101,8 +121,8 @@ class Storage:
                 h = it.get("item_hash") or self._hash_item(it)
                 conn.execute("""
                     INSERT OR IGNORE INTO news_feed 
-                    (item_hash, source_type, channel, category, title, content, url, published_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    (item_hash, source_type, channel, category, title, content, url, image_url, published_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     h,
                     it.get("source_type", "unknown"),
@@ -111,13 +131,14 @@ class Storage:
                     it.get("title", ""),
                     it.get("content", ""),
                     it.get("url", ""),
+                    it.get("image_url", ""),
                     it.get("published_at", "")
                 ))
 
     def get_news_feed(self, limit: int = 40) -> List[Dict[str, Any]]:
         with self._get_connection() as conn:
             cur = conn.execute(
-                "SELECT id, channel, category, title, content, url, published_at, created_at FROM news_feed ORDER BY id DESC LIMIT ?",
+                "SELECT id, channel, category, title, content, url, image_url, published_at, created_at FROM news_feed ORDER BY id DESC LIMIT ?",
                 (limit,)
             )
             rows = cur.fetchall()
@@ -135,6 +156,39 @@ class Storage:
             cur = conn.execute("SELECT digest_text FROM digest_history ORDER BY id DESC LIMIT 1")
             row = cur.fetchone()
             return row["digest_text"] if row else None
+
+    def save_full_digest(
+        self,
+        date_str: str,
+        provider: str,
+        model: str,
+        post_html: str,
+        report_md: str,
+        report_html_path: str,
+        report_md_path: str,
+        lead_image_url: str = ""
+    ) -> int:
+        with self._get_connection() as conn:
+            cur = conn.execute("""
+                INSERT INTO full_digests 
+                (date_str, provider_used, model_used, post_html, report_md, report_html_path, report_md_path, lead_image_url)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                date_str, provider, model, post_html, report_md, report_html_path, report_md_path, lead_image_url
+            ))
+            return cur.lastrowid
+
+    def get_latest_full_digest(self) -> Optional[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            cur = conn.execute("SELECT * FROM full_digests ORDER BY id DESC LIMIT 1")
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+    def get_full_digest_by_id(self, digest_id: int) -> Optional[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            cur = conn.execute("SELECT * FROM full_digests WHERE id = ?", (digest_id,))
+            row = cur.fetchone()
+            return dict(row) if row else None
 
     # --------------------------------------------------------------------------
     # Настройки и состояние (включая режим чата)

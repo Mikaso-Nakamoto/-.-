@@ -39,6 +39,30 @@ class RSSCollector:
 
                 published_at = entry.get("published", "") or entry.get("updated", "") or datetime.utcnow().isoformat()
 
+                # Извлечение прикрепленного изображения из RSS
+                image_url = ""
+                if "media_content" in entry and entry.media_content:
+                    for media in entry.media_content:
+                        if media.get("url"):
+                            image_url = media["url"]
+                            break
+                if not image_url and "enclosures" in entry and entry.enclosures:
+                    for enc in entry.enclosures:
+                        enc_type = enc.get("type", "")
+                        enc_href = enc.get("href", "")
+                        if enc_type.startswith("image/") or enc_href.lower().endswith((".jpg", ".jpeg", ".png", ".webp")):
+                            image_url = enc_href
+                            break
+                if not image_url and "media_thumbnail" in entry and entry.media_thumbnail:
+                    image_url = entry.media_thumbnail[0].get("url", "")
+                if not image_url:
+                    raw_html = entry.get("summary", "") or entry.get("description", "")
+                    if "<img" in raw_html:
+                        img_soup = BeautifulSoup(raw_html, "html.parser")
+                        img_tag = img_soup.find("img")
+                        if img_tag and img_tag.get("src"):
+                            image_url = img_tag["src"]
+
                 items.append({
                     "source_type": "rss",
                     "channel": feed_name,
@@ -46,6 +70,7 @@ class RSSCollector:
                     "title": title,
                     "content": content,
                     "url": link,
+                    "image_url": image_url,
                     "published_at": published_at,
                     "guid": guid
                 })

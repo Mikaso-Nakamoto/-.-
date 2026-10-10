@@ -61,6 +61,26 @@ class TelegramWebCollector:
                 if not text or len(text) < 15:
                     continue
 
+                # Извлечение прикрепленного изображения
+                image_url = ""
+                photo_wrap = msg_div.find("a", class_="tgme_widget_message_photo_wrap")
+                if photo_wrap and photo_wrap.get("style"):
+                    m = re.search(r"url\(['\"]?(https?://[^'\"]+)['\"]?\)", photo_wrap["style"])
+                    if m:
+                        image_url = m.group(1)
+
+                if not image_url:
+                    video_thumb = msg_div.find(class_=re.compile(r"tgme_widget_message.*thumb"))
+                    if video_thumb and video_thumb.get("style"):
+                        m = re.search(r"url\(['\"]?(https?://[^'\"]+)['\"]?\)", video_thumb["style"])
+                        if m:
+                            image_url = m.group(1)
+
+                if not image_url:
+                    img_tag = msg_div.find("img")
+                    if img_tag and img_tag.get("src"):
+                        image_url = img_tag["src"]
+
                 items.append({
                     "source_type": "telegram",
                     "channel": f"@{username}",
@@ -68,6 +88,7 @@ class TelegramWebCollector:
                     "title": text[:80] + ("..." if len(text) > 80 else ""),
                     "content": text,
                     "url": post_link,
+                    "image_url": image_url,
                     "published_at": published_at,
                     "guid": post_link or f"{username}_{published_at}"
                 })

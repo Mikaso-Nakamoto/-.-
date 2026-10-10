@@ -1,11 +1,16 @@
 import os
 import logging
+from pathlib import Path
 from datetime import datetime
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from aiogram import Bot
+from aiogram.types import FSInputFile, LinkPreviewOptions
+from aiogram.exceptions import TelegramBadRequest
+
 from src.pipeline.digest_builder import DigestBuilder
 from src.config import SchedulerConfig, load_preferences
+from src.bot.keyboards import get_digest_feedback_keyboard
 
 logger = logging.getLogger(__name__)
 
@@ -27,12 +32,60 @@ class DigestScheduler:
         logger.info(f"Запуск планового утреннего дайджеста (08:50, {self.timezone_name})...")
         try:
             res = await self.builder.generate_digest()
-            text = f"☀️ *Доброе утро! Ваша сводка на 08:50 ({self.timezone_name}):*\n\n" + res["text"]
-            if len(text) > 4000:
-                for x in range(0, len(text), 4000):
-                    await self.bot.send_message(self.admin_id, text[x:x+4000], parse_mode="Markdown")
-            else:
-                await self.bot.send_message(self.admin_id, text, parse_mode="Markdown")
+            if not res.get("success"):
+                await self.bot.send_message(self.admin_id, f"⚠️ Не удалось сформировать утреннюю сводку: {res.get('text')}")
+                return
+
+            post_html = res.get("telegram_post_html") or res.get("text")
+            lead_img = res.get("lead_image_url")
+            html_path = res.get("full_report_html_path")
+            md_path = res.get("full_report_md_path")
+            md_file_id = Path(md_path).name if md_path else None
+            web_app_url = os.getenv("WEB_APP_URL") or "http://192.168.0.169:8000"
+
+            kb = get_digest_feedback_keyboard(web_app_url=web_app_url, md_file_id=md_file_id)
+
+            greeting = f"☀️ <b>Доброе утро! Ваша аналитическая сводка на 08:50 ({self.timezone_name}):</b>\n\n"
+            full_post = greeting + post_html
+
+            # Настройки предпросмотра фото новости
+            preview_options = None
+            if lead_img and lead_img.startswith("http"):
+                preview_options = LinkPreviewOptions(
+                    url=lead_img,
+                    prefer_large_media=True,
+                    show_above_text=True
+                )
+
+            # 1. Отправляем визуальный пост с нативными сворачиваемыми блоками
+            try:
+                if len(full_post) > 4000:
+                    for x in range(0, len(full_post), 4000):
+                        await self.bot.send_message(self.admin_id, full_post[x:x+4000], parse_mode="HTML")
+                    await self.bot.send_message(self.admin_id, "💬 <b>Действия со сводкой:</b>", parse_mode="HTML", reply_markup=kb)
+                else:
+                    await self.bot.send_message(
+                        self.admin_id,
+                        full_post,
+                        parse_mode="HTML",
+                        reply_markup=kb,
+                        link_preview_options=preview_options
+                    )
+            except TelegramBadRequest as e:
+                logger.warning(f"Telegram parse error in morning digest ({e}), sending plain text...")
+                await self.bot.send_message(self.admin_id, full_post, reply_markup=kb)
+
+            # 2. Отправляем полноценный HTML-документ прямо в Telegram
+            if html_path and os.path.exists(html_path):
+                today_str = datetime.now().strftime("%d.%m.%Y")
+                doc = FSInputFile(html_path, filename=f"Digest_{today_str}.html")
+                await self.bot.send_document(
+                    self.admin_id,
+                    document=doc,
+                    caption="📑 <b>Полный аналитический отчет со всеми таблицами</b>\n<i>Нажмите на файл — откроется прямо внутри Telegram.</i>",
+                    parse_mode="HTML"
+                )
+
         except Exception as e:
             logger.error(f"Ошибка при отправке утреннего дайджеста: {e}")
 

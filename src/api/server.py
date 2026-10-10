@@ -54,11 +54,35 @@ def create_app(storage: Storage, router: LLMRouter, digest_builder: DigestBuilde
     # --------------------------------------------------------------------------
     @app.get("/api/digest/latest")
     async def get_latest_digest():
-        digest = storage.get_latest_digest()
+        full_dig = storage.get_latest_full_digest()
+        if full_dig:
+            return {
+                "success": True,
+                "digest": full_dig.get("post_html") or full_dig.get("report_md"),
+                "full_digest": full_dig
+            }
+        legacy_digest = storage.get_latest_digest()
         return {
             "success": True,
-            "digest": digest or "Сводка еще не формировалась."
+            "digest": legacy_digest or "Сводка еще не формировалась."
         }
+
+    @app.get("/digest")
+    async def view_latest_digest_html():
+        full_dig = storage.get_latest_full_digest()
+        if full_dig and full_dig.get("report_html_path"):
+            p = Path(full_dig["report_html_path"])
+            if p.exists():
+                return FileResponse(str(p), media_type="text/html")
+        return FileResponse(str(static_dir / "index.html"))
+
+    @app.get("/api/digest/download/{filename}")
+    async def download_digest_file(filename: str):
+        safe_filename = Path(filename).name
+        file_path = Path("data/digests") / safe_filename
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail="Файл не найден")
+        return FileResponse(str(file_path), filename=safe_filename)
 
     # --------------------------------------------------------------------------
     # 3. Принудительный сбор свежих новостей

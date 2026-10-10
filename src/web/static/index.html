@@ -69,6 +69,19 @@
     .source-link { color: var(--accent-cyan); text-decoration: none; font-size: 0.78rem; font-family: 'JetBrains Mono', monospace; display: flex; align-items: center; gap: 4px; }
     .source-link:hover { text-decoration: underline; }
 
+    /* Стили для цитат и сворачиваемых блоков дайджеста */
+    blockquote {
+      background: #111218;
+      border-left: 3px solid var(--accent-cyan);
+      border-radius: 0 8px 8px 0;
+      padding: 10px 14px;
+      margin: 10px 0;
+      font-size: 0.88rem;
+      line-height: 1.5;
+      color: #cbd5e1;
+    }
+    blockquote b { color: #f8fafc; display: block; margin-bottom: 4px; }
+
     .btn-group { display: flex; gap: 6px; }
     .btn-icon { background: #1a1b22; border: 1px solid var(--card-border); color: var(--text-muted); padding: 4px 10px; border-radius: 6px; cursor: pointer; font-size: 0.8rem; transition: all 0.15s ease; }
     .btn-icon:hover { background: #23252f; color: var(--text-main); border-color: #383a48; }
@@ -284,6 +297,7 @@
               <span class="tag">[${(it.category || 'NEWS').toUpperCase()}]</span>
               <span class="channel-tag">${it.channel || ''}</span>
             </div>
+            ${it.image_url ? `<img src="${it.image_url}" style="width:100%; max-height:200px; object-fit:cover; border-radius:6px; margin-bottom:10px; border:1px solid var(--card-border);" alt="Preview" onerror="this.style.display='none'">` : ''}
             <div class="card-title">${escapeHtml(it.title || '')}</div>
             <div class="card-body">${escapeHtml((it.content || '').substring(0, 260))}...</div>
             <div class="card-footer">
@@ -305,7 +319,19 @@
       try {
         const res = await fetch('/api/digest/latest');
         const data = await res.json();
-        box.innerText = data.digest || 'Сводка еще не формировалась.';
+        if (data.full_digest && data.full_digest.post_html) {
+          box.innerHTML = `
+            <div style="margin-bottom: 14px;">${data.full_digest.post_html}</div>
+            <div style="border-top: 1px solid var(--card-border); padding-top: 14px; margin-top: 14px; display: flex; flex-wrap: wrap; gap: 8px;">
+              <a href="/digest" target="_blank" class="btn-icon" style="color:var(--accent-cyan); border-color:rgba(6,182,212,0.3); text-decoration:none; padding:8px 14px; display:inline-flex; align-items:center; gap:6px;">
+                📑 Открыть полный отчет (со всеми таблицами) ➔
+              </a>
+              ${data.full_digest.report_md_path ? `<a href="/api/digest/download/${encodeURIComponent(data.full_digest.report_md_path.split('/').pop())}" class="btn-icon" style="text-decoration:none; padding:8px 14px;">💾 Скачать .MD</a>` : ''}
+            </div>
+          `;
+        } else {
+          box.innerHTML = `<div style="white-space:pre-wrap;">${escapeHtml(data.digest || 'Сводка еще не формировалась.')}</div>`;
+        }
       } catch (e) {
         box.innerText = 'Не удалось загрузить последний дайджест.';
       }

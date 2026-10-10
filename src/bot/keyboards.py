@@ -1,27 +1,35 @@
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from typing import Optional
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 from src.llm.router import POPULAR_MODELS
 
-def get_main_menu_keyboard(chat_mode: bool = False) -> InlineKeyboardMarkup:
+def get_main_menu_keyboard(chat_mode: bool = False, web_app_url: Optional[str] = None) -> InlineKeyboardMarkup:
     chat_btn = (
         InlineKeyboardButton(text="🔴 Завершить режим чата", callback_data="btn_chat_stop")
         if chat_mode
         else InlineKeyboardButton(text="💬 Режим диалога (Чат)", callback_data="btn_chat_start")
     )
 
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="📰 Дайджест сейчас", callback_data="btn_run_digest"),
-            InlineKeyboardButton(text="⚡️ Статус нод", callback_data="btn_status")
-        ],
-        [
-            InlineKeyboardButton(text="🧠 Выбор нейросети", callback_data="btn_select_provider"),
-            InlineKeyboardButton(text="🎯 Модели", callback_data="btn_browse_models")
-        ],
-        [
-            chat_btn,
-            InlineKeyboardButton(text="📡 Источники", callback_data="btn_sources")
-        ]
-    ])
+    first_row = [
+        InlineKeyboardButton(text="📰 Дайджест сейчас", callback_data="btn_run_digest"),
+        InlineKeyboardButton(text="⚡️ Статус нод", callback_data="btn_status")
+    ]
+
+    second_row = [
+        InlineKeyboardButton(text="🧠 Выбор нейросети", callback_data="btn_select_provider"),
+        InlineKeyboardButton(text="🎯 Модели", callback_data="btn_browse_models")
+    ]
+
+    third_row = [
+        chat_btn,
+        InlineKeyboardButton(text="📡 Источники", callback_data="btn_sources")
+    ]
+
+    rows = [first_row, second_row, third_row]
+
+    if web_app_url:
+        rows.append([InlineKeyboardButton(text="📱 Открыть окно внутри TG", web_app=WebAppInfo(url=web_app_url))])
+
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def get_chat_control_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -34,16 +42,27 @@ def get_chat_control_keyboard() -> InlineKeyboardMarkup:
         ]
     ])
 
-def get_digest_feedback_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
+def get_digest_feedback_keyboard(web_app_url: Optional[str] = None, md_file_id: Optional[str] = None) -> InlineKeyboardMarkup:
+    rows = [
         [
             InlineKeyboardButton(text="👍 Отличная подборка", callback_data="fb_like"),
             InlineKeyboardButton(text="👎 Слишком много мусора", callback_data="fb_dislike")
-        ],
-        [
-            InlineKeyboardButton(text="💬 Обсудить этот дайджест с ИИ", callback_data="btn_chat_start")
         ]
-    ])
+    ]
+
+    action_row = [
+        InlineKeyboardButton(text="💬 Обсудить с ИИ", callback_data="btn_chat_start")
+    ]
+    if web_app_url:
+        action_row.append(InlineKeyboardButton(text="📱 Открыть окно в TG", web_app=WebAppInfo(url=web_app_url)))
+    rows.append(action_row)
+
+    if md_file_id:
+        rows.append([
+            InlineKeyboardButton(text="📄 Скачать исходный .MD", callback_data=f"getmd__{md_file_id}")
+        ])
+
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def get_provider_selection_keyboard(current_provider: str) -> InlineKeyboardMarkup:
     providers = [
