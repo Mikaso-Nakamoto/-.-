@@ -20,7 +20,7 @@ from src.config import load_sources
 
 logger = logging.getLogger(__name__)
 
-def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: Storage, admin_id: int) -> Router:
+def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: Storage, admin_id: int, scheduler=None) -> Router:
     r = Router()
 
     def is_admin(user_id: int) -> bool:
@@ -52,6 +52,8 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
         active_prov = llm_router.active_provider
         current_model = llm_router.get_current_model_for_provider(active_prov if active_prov != "auto" else "openrouter")
         chat_active = storage.is_chat_mode_active()
+        tz_name = scheduler.timezone_name if scheduler else "Europe/Moscow"
+        next_run = scheduler.get_next_run_time() if scheduler else "08:50"
 
         text = (
             f"👋 *Привет! Я твой автономный ИИ-хаб.*\n\n"
@@ -59,10 +61,12 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
             f"🖥 *Основной ПК (LM Studio):* {local_status}\n"
             f"🧠 *Активный провайдер:* `{active_prov.upper()}`\n"
             f"🎯 *Текущая модель:* `{current_model}`\n"
-            f"⏰ *Расписание дайджеста:* `Каждый день в 08:50`\n"
+            f"⏰ *Расписание:* `08:50 ({tz_name})`\n"
+            f"⏳ *Следующая сводка:* `{next_run}`\n"
             f"💬 *Режим чата:* {'🟢 ВКЛЮЧЕН' if chat_active else '⚪️ Выключен'}\n\n"
             f"Используйте кнопки ниже для управления:"
         )
+        await msg.answer(clean_telegram_markdown(text), parse_mode="Markdown", reply_markup=get_main_menu_keyboard(chat_active))
         await msg.answer(clean_telegram_markdown(text), parse_mode="Markdown", reply_markup=get_main_menu_keyboard(chat_active))
 
     @r.callback_query(F.data == "btn_menu")
@@ -234,10 +238,14 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
     @r.callback_query(F.data == "btn_status")
     async def cmd_status(event: Message | CallbackQuery):
         local_on = await llm_router.check_local_health()
+        tz_name = scheduler.timezone_name if scheduler else "Europe/Moscow"
+        next_run = scheduler.get_next_run_time() if scheduler else "08:50"
+
         text = (
             f"📊 *Статус узлов системы (2026):*\n\n"
             f"1. 💻 *Ноутбук (Сервер 24/7):* 🟢 В сети\n"
-            f"   - Планировщик (08:50): OK\n"
+            f"   - Планировщик: `08:50 ({tz_name})`\n"
+            f"   - Следующая сводка: `{next_run}`\n"
             f"   - База дедупликации SQLite: OK\n\n"
             f"2. 🖥 *Основной ПК (LM Studio + Qwen 2.5):*\n"
             f"   - Статус сервера LM Studio: {'🟢 Доступен (порт 1234)' if local_on else '⚪️ Не отвечает (офлайн/сон)'}\n"

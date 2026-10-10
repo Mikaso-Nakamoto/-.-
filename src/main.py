@@ -47,12 +47,12 @@ async def main():
     bot = Bot(token=cfg.bot.token)
     dp = Dispatcher()
 
-    router = setup_router(digest_builder, llm_router, storage, cfg.bot.admin_id)
-    dp.include_router(router)
-
     # Инициализация планировщика (08:50)
     scheduler = DigestScheduler(cfg.scheduler, digest_builder, bot, cfg.bot.admin_id)
     scheduler.start()
+
+    router = setup_router(digest_builder, llm_router, storage, cfg.bot.admin_id, scheduler)
+    dp.include_router(router)
 
     logger.info("🚀 Автономный ИИ-хаб успешно запущен и готов к работе!")
     try:
