@@ -38,12 +38,23 @@ sources:
       category: "Мировая политика & Новости"
     - username: "rybar"
       category: "Военно-политическая аналитика"
+    - username: "ross_name"
+      category: "Военно-политическая аналитика & СВО"
+    - username: "Dyadyabatya0"
+      category: "Мировая политика & Новости"
+    - username: "rostov_tsargrad"
+      category: "Новости Юга & Регионы России"
 
     # Западные и международные каналы
     - username: "bbcrussian"
       category: "Международная аналитика"
 
   rss_feeds:
+    # Региональные и федеральные СМИ
+    - url: "https://rostov.tsargrad.tv/rss"
+      name: "Царьград Ростов"
+      category: "Новости Юга & Регионы России"
+
     # IT, Инфобез и Технологии (Хакер.ру, OpenNet, 3DNews, Habr, ArsTechnica)
     - url: "https://xakep.ru/feed/"
       name: "Журнал Хакер"

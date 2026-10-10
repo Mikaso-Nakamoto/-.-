@@ -84,25 +84,43 @@ class TelegramWebCollector:
                 if not text or len(text) < 15:
                     continue
 
-                # Извлечение прикрепленного изображения
+                # 1. Поиск ссылок на YouTube в тексте публикации
+                yt_match = re.search(r'(https?://(?:www\.)?(?:youtube\.com/watch\?v=|youtu\.be/|youtube\.com/shorts/)[a-zA-Z0-9_-]+)', text)
+                youtube_url = yt_match.group(1) if yt_match else ""
+
+                # 2. Извлечение прикрепленного изображения или обложки видео
                 image_url = ""
-                photo_wrap = msg_div.find("a", class_="tgme_widget_message_photo_wrap")
-                if photo_wrap and photo_wrap.get("style"):
-                    m = re.search(r"url\(['\"]?(https?://[^'\"]+)['\"]?\)", photo_wrap["style"])
-                    if m:
-                        image_url = m.group(1)
+                video_url = ""
 
-                if not image_url:
-                    video_thumb = msg_div.find(class_=re.compile(r"tgme_widget_message.*thumb"))
-                    if video_thumb and video_thumb.get("style"):
-                        m = re.search(r"url\(['\"]?(https?://[^'\"]+)['\"]?\)", video_thumb["style"])
+                # А. Поиск background-image: url(...) среди всех элементов блока (фото, видео-превью, превью ссылок)
+                for elem in msg_div.find_all(style=True):
+                    st = elem.get("style", "")
+                    if "url(" in st:
+                        m = re.search(r"url\(['\"]?(https?://[^'\"\)]+)['\"]?\)", st)
                         if m:
-                            image_url = m.group(1)
+                            cand = m.group(1)
+                            classes = elem.get("class", [])
+                            cls_str = " ".join(classes) if isinstance(classes, list) else str(classes)
+                            if "user_photo" not in cls_str and "avatar" not in cls_str:
+                                image_url = cand
+                                break
 
+                # Б. Поиск тегов <img>
                 if not image_url:
-                    img_tag = msg_div.find("img")
-                    if img_tag and img_tag.get("src"):
-                        image_url = img_tag["src"]
+                    for img in msg_div.find_all("img"):
+                        src = img.get("src", "")
+                        classes = img.get("class", [])
+                        cls_str = " ".join(classes) if isinstance(classes, list) else str(classes)
+                        if src.startswith("http") and "user_photo" not in cls_str and "avatar" not in cls_str:
+                            image_url = src
+                            break
+
+                # В. Поиск тегов <video>
+                for vid in msg_div.find_all("video"):
+                    if not image_url and vid.get("poster"):
+                        image_url = vid["poster"]
+                    if vid.get("src"):
+                        video_url = vid["src"]
 
                 items.append({
                     "source_type": "telegram",
@@ -112,6 +130,8 @@ class TelegramWebCollector:
                     "content": text,
                     "url": post_link,
                     "image_url": image_url,
+                    "video_url": video_url,
+                    "youtube_url": youtube_url,
                     "published_at": published_at,
                     "guid": post_link or f"{username}_{published_at}"
                 })

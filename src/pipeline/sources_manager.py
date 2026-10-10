@@ -189,7 +189,7 @@ async def determine_channel_category_with_ai(username_or_url: str, router) -> st
     items = []
     try:
         collector = TelegramWebCollector([{"username": clean_user}])
-        items = await collector.fetch_all(limit_per_channel=4)
+        items = await collector.fetch_all(limit_per_channel=8)
     except Exception as e:
         logger.warning(f"Ошибка сбора постов для анализа канала @{clean_user}: {e}")
 
@@ -197,21 +197,28 @@ async def determine_channel_category_with_ai(username_or_url: str, router) -> st
         return "Общее и Новости"
 
     snippets = []
-    for it in items[:4]:
+    for it in items[:8]:
         snippets.append(f"• {it.get('title', '')}\n{it.get('content', '')[:250]}")
     post_samples = "\n---\n".join(snippets)
 
     prompt = f"""Ты — классификатор контента.
-Твоя задача — проанализировать недавние публикации Telegram-канала '@{clean_user}' и определить одну точную, емкую тематическую категорию (2-4 слова на русском языке).
+Твоя задача — проанализировать публикации Telegram-канала '@{clean_user}' и определить одну точную, емкую тематическую категорию (2-4 слова на русском языке).
 
 Примеры стандартных категорий:
+- Военно-политическая аналитика & СВО
+- Мировая политика & Новости
+- Ситуация на Украине & Фронт
+- Региональные новости России
+- Кибербезопасность & IT
 - Нейросети и ИИ
-- DevOps & Self-Hosted
-- Разработка и Кодинг
-- Hardware & GPU
-- Кибербезопасность & SecOps
+- DevOps & Разработка
+- Hardware & Гаджеты
+- Экономика и Финансы
 
-ВАЖНО: Если контент канала посвящен другой теме, ты ОБЯЗАН создать НОВУЮ точную категорию (например: '3D-печать и DIY', 'GameDev & Unreal', 'Аниме & Мультипликация', 'Финансы и Крипта', 'Биотехнологии', 'Авто & Электрокары').
+ПРАВИЛА КЛАССИФИКАЦИИ:
+1. Если посты посвящены конфликту на Украине, СВО, действиям армии, геополитике, мировым лидерам или санкциям — используй категорию «Военно-политическая аналитика & СВО» или «Мировая политика & Новости». НЕЛЬЗЯ классифицировать политические каналы как «Наука и будущее»!
+2. Если канал посвящен технологиям/ИИ/программированию — используй соответствующую IT-категорию.
+3. Ты также можешь создать новую точную категорию (2-4 слова), точно отражающую суть публикаций.
 
 ПУБЛИКАЦИИ КАНАЛА:
 {post_samples}
@@ -238,7 +245,7 @@ async def determine_rss_category_with_ai(url: str, router) -> str:
     items = []
     try:
         collector = RSSCollector([{"url": clean_url, "name": "feed"}])
-        items = await collector.fetch_all(limit_per_feed=4)
+        items = await collector.fetch_all(limit_per_feed=8)
     except Exception as e:
         logger.warning(f"Ошибка сбора RSS для классификации: {e}")
 
@@ -246,16 +253,21 @@ async def determine_rss_category_with_ai(url: str, router) -> str:
         return "Общее и Новости"
 
     snippets = []
-    for it in items[:4]:
+    for it in items[:8]:
         snippets.append(f"• {it.get('title', '')}\n{it.get('content', '')[:250]}")
     post_samples = "\n---\n".join(snippets)
 
     prompt = f"""Ты — классификатор контента.
-Проанализируй заголовки статей из ленты '{clean_url}' и определи одну точную категорию (2-4 слова на русском языке).
-Ты МОЖЕШЬ придумать НОВУЮ категорию (например: 'Hardware & GPU', 'Нейросети и ИИ', 'DevOps & Linux', 'Наука и Космос').
+Проанализируй заголовки и темы статей из ленты '{clean_url}' и определи одну точную категорию (2-4 слова на русском языке).
 
-СТАТЬИ ЛЕНТЫ:
-{post_samples}
+Примеры категорий:
+- Военно-политическая аналитика & СВО
+- Мировая политика & Новости
+- Региональные новости России
+- Кибербезопасность & IT
+- Нейросети и ИИ
+- DevOps & Разработка
+- Hardware & GPU
 
 ОТВЕТ: Напиши ТОЛЬКО название категории (2-4 слова).
 """

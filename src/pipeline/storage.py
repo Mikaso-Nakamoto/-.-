@@ -150,6 +150,21 @@ class Storage:
             conn.execute("DELETE FROM digest_history")
             conn.execute("DELETE FROM chat_history")
 
+    def is_youtube_video_seen(self, video_url: str) -> bool:
+        """Проверяет, было ли уже отправлено уведомление об этом видео"""
+        with self._get_connection() as conn:
+            cur = conn.execute("SELECT 1 FROM seen_items WHERE url = ?", (video_url,))
+            return cur.fetchone() is not None
+
+    def mark_youtube_video_seen(self, video_url: str, title: str = ""):
+        """Фиксирует отправленное YouTube-видео во избежание дублей"""
+        with self._get_connection() as conn:
+            h = hashlib.sha256(video_url.encode("utf-8")).hexdigest()
+            conn.execute(
+                "INSERT OR IGNORE INTO seen_items (item_hash, source_type, channel, url) VALUES (?, ?, ?, ?)",
+                (h, "youtube_ross", "@ross_name", video_url)
+            )
+
     def get_news_feed(self, limit: int = 40) -> List[Dict[str, Any]]:
         with self._get_connection() as conn:
             cur = conn.execute(

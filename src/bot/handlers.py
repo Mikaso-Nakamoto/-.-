@@ -1,6 +1,8 @@
 import logging
 import os
 import re
+import html
+import httpx
 from pathlib import Path
 from datetime import datetime
 from aiogram import Router, F
@@ -13,9 +15,31 @@ from aiogram.types import (
     MessageReactionUpdated,
     FSInputFile,
     LinkPreviewOptions,
-    InputMediaPhoto
+    InputMediaPhoto,
+    BufferedInputFile
 )
 from aiogram.exceptions import TelegramBadRequest
+
+async def download_image_as_input_file(url: str, timeout: float = 8.0) -> BufferedInputFile | None:
+    if not url or not url.startswith("http"):
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+            resp = await client.get(url, headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+                "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"
+            })
+            if resp.status_code == 200 and len(resp.content) > 400:
+                ct = resp.headers.get("content-type", "").lower()
+                ext = ".jpg"
+                if "png" in ct:
+                    ext = ".png"
+                elif "webp" in ct:
+                    ext = ".webp"
+                return BufferedInputFile(resp.content, filename=f"preview{ext}")
+    except Exception as e:
+        logger.warning(f"Не удалось загрузить изображение {url}: {e}")
+    return None
 
 from src.llm.router import LLMRouter
 from src.llm.prompts import markdown_to_telegram_html
@@ -292,27 +316,41 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
         # Кнопки под постом: Оценка, Чат, Окно в TG, Скачать MD
         kb = get_digest_feedback_keyboard(web_app_url=get_web_app_url(), md_file_id=md_file_id)
 
-        # 1. Отправляем фотографии из источников, вошедших в подборку
-        source_images = res.get("source_images") or ([lead_img] if lead_img else [])
-        if len(source_images) >= 2:
-            media_group = [InputMediaPhoto(media=u) for u in source_images[:4]]
-            try:
-                await msg.answer_media_group(media=media_group)
-            except Exception as e:
-                logger.warning(f"Не удалось отправить медиагруппу источников ({e}), пробуем одиночное фото...")
-                if lead_img:
-                    try:
-                        await msg.answer_photo(photo=lead_img)
-                    except Exception:
-                        pass
-        elif len(source_images) == 1:
-            try:
-                await msg.answer_photo(photo=source_images[0])
-            except Exception as e:
-                logger.warning(f"Не удалось отправить фото источника: {e}")
+        # 1. Загружаем реальное фото из первоисточников в виде бинарного файла
+        photo_file = None
+        if lead_img and lead_img.startswith("http"):
+            photo_file = await download_image_as_input_file(lead_img)
 
-        # 2. Отправляем структурированный текстовый пост без цитат
-        await send_safe_reply(msg, post_html, reply_markup=kb)
+        # 2. Если пост до 1024 символов и есть фото — отправляем цельной фото-карточкой (как в канале Дядя Батя!)
+        sent_as_photo = False
+        if photo_file and len(post_html) <= 1024:
+            try:
+                await msg.answer_photo(
+                    photo=photo_file,
+                    caption=post_html,
+                    parse_mode="HTML",
+                    reply_markup=kb
+                )
+                sent_as_photo = True
+            except Exception as e:
+                logger.warning(f"Не удалось отправить фото с подписью ({e}), переключаемся на раздельный вывод...")
+
+        if not sent_as_photo:
+            # Если текст длиннее 1024 символов:
+            # А. Сначала отправляем реальное фото источников наверх поста
+            if photo_file:
+                try:
+                    await msg.answer_photo(photo=photo_file)
+                except Exception as e:
+                    logger.warning(f"Ошибка отправки фото: {e}")
+            elif lead_img and lead_img.startswith("http"):
+                try:
+                    await msg.answer_photo(photo=lead_img)
+                except Exception:
+                    pass
+
+            # Б. Отправляем структурированный текстовый пост с кнопками
+            await send_safe_reply(msg, post_html, reply_markup=kb)
 
         # 3. Отправляем полноценный .MD файл прямо в Telegram
         if md_path and os.path.exists(md_path):
@@ -323,6 +361,66 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
                 caption="📑 <b>Полный аналитический отчет со всеми таблицами</b>\n<i>Нажмите на файл — откроется прямо в Telegram со всеми деталями.</i>",
                 parse_mode="HTML"
             )
+
+    # --------------------------------------------------------------------------
+    # Просмотр свежих публикаций ленты с фотографиями: /feed или /news
+    # --------------------------------------------------------------------------
+    @r.message(Command("feed", "news"))
+    async def cmd_feed_posts(msg: Message):
+        if not is_admin(msg.from_user.id):
+            return
+
+        items = storage.get_news_feed(limit=5)
+        if not items:
+            await send_safe_reply(msg, "📭 Лента пуста. Нажмите /digest для сбора свежих публикаций.")
+            return
+
+        for it in items:
+            ch = it.get("channel", "Канал")
+            cat = it.get("category", "Новости")
+            title = it.get("title", "")
+            content = it.get("content", "")
+            url = it.get("url", "")
+            img_url = it.get("image_url", "")
+
+            caption = (
+                f"📢 <b>{html.escape(ch)}</b> • <i>{html.escape(cat)}</i>\n\n"
+                f"<b>{html.escape(title)}</b>\n\n"
+                f"{html.escape(content[:400])}\n\n"
+            )
+            if url:
+                caption += f"🔗 <a href=\"{url}\">Первоисточник</a>"
+
+            photo_file = None
+            if img_url and img_url.startswith("http"):
+                photo_file = await download_image_as_input_file(img_url)
+
+            if photo_file:
+                try:
+                    await msg.answer_photo(photo=photo_file, caption=caption, parse_mode="HTML")
+                    continue
+                except Exception as e:
+                    logger.debug(f"Ошибка отправки фото поста ленты: {e}")
+
+            await send_safe_reply(msg, caption)
+
+    # --------------------------------------------------------------------------
+    # Ручная проверка новых видео RossName на YouTube: /checkross или /checkvideo
+    # --------------------------------------------------------------------------
+    @r.message(Command("checkross", "checkvideo"))
+    async def cmd_check_ross_yt(msg: Message):
+        if not is_admin(msg.from_user.id):
+            return
+        status = await send_safe_reply(msg, "🔍 <i>Проверяю канал @ross_name на новые YouTube-видео...</i>")
+        if scheduler:
+            await scheduler.check_ross_name_youtube()
+            try:
+                await status.delete()
+            except Exception:
+                pass
+            await send_safe_reply(msg, "✅ <b>Проверка завершена!</b>\nЕсли были опубликованы новые ночные/утренние видео, уведомление пришло сообщением выше.")
+        else:
+            await send_safe_reply(msg, "⚠️ Планировщик фоновых задач не инициализирован.")
 
     # --------------------------------------------------------------------------
     # Очистка базы и архивов: /clearnews или /purge
