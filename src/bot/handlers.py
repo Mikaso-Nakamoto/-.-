@@ -317,6 +317,29 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
         storage.set_setting(f"model_{provider}", model_name)
         await msg.answer(f"✅ Для провайдера *{provider.upper()}* установлена модель:\n`{model_name}`", parse_mode="Markdown")
 
+    async def send_safe_reply(msg: Message, text: str, reply_markup=None):
+        cleaned = clean_telegram_markdown(text)
+        try:
+            if len(cleaned) > 4000:
+                for x in range(0, len(cleaned), 4000):
+                    await msg.answer(cleaned[x:x+4000], parse_mode="Markdown")
+                if reply_markup:
+                    await msg.answer("💬 *Управление диалогом:*", parse_mode="Markdown", reply_markup=reply_markup)
+            else:
+                await msg.answer(cleaned, parse_mode="Markdown", reply_markup=reply_markup)
+        except TelegramBadRequest as e:
+            logger.warning(f"Telegram parse error ({e}), retrying as plain text...")
+            if len(text) > 4000:
+                for x in range(0, len(text), 4000):
+                    await msg.answer(text[x:x+4000])
+                if reply_markup:
+                    await msg.answer("💬 Управление диалогом:", reply_markup=reply_markup)
+            else:
+                await msg.answer(text, reply_markup=reply_markup)
+        except Exception as e:
+            logger.error(f"Failed to send message: {e}")
+            await msg.answer(f"⚠️ Ошибка отправки: {e}")
+
     # --------------------------------------------------------------------------
     # ПРЯМОЙ ЧАТ С ИИ
     # --------------------------------------------------------------------------
@@ -341,34 +364,42 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
         history = storage.get_chat_history(limit=6)
         latest_digest = storage.get_latest_digest()
 
-        res = await llm_router.generate_response(
-            task="chat",
-            user_prompt=user_query,
-            chat_history=history,
-            latest_digest=latest_digest
-        )
+        # Формируем контекст последних новостей из базы
+        recent_items = storage.get_news_feed(limit=10)
+        recent_news_str = ""
+        if recent_items:
+            news_parts = []
+            for i, it in enumerate(recent_items[:8], 1):
+                news_parts.append(f"[{i}] {it.get('title')}\n{it.get('content')[:350]}\nСсылка: {it.get('url')}")
+            recent_news_str = "\n---\n".join(news_parts)
 
-        if not res.get("success"):
-            await msg.answer(f"⚠️ {res.get('content')}")
-            return
+        try:
+            res = await llm_router.generate_response(
+                task="chat",
+                user_prompt=user_query,
+                chat_history=history,
+                latest_digest=latest_digest,
+                recent_news=recent_news_str
+            )
 
-        answer_text = clean_telegram_markdown(res["content"])
+            if not res.get("success"):
+                await send_safe_reply(msg, f"⚠️ {res.get('content')}")
+                return
 
-        # Сохраняем ход беседы в память
-        storage.add_chat_message("user", user_query)
-        storage.add_chat_message("assistant", answer_text)
+            answer_text = res["content"]
 
-        footer = f"\n\n🤖 *{res.get('provider').upper()}* (`{res.get('model')}`) • ⏱ {res.get('latency')} сек."
-        if res.get("fallback_occurred"):
-            footer += " _(failover)_"
+            # Сохраняем ход беседы в память
+            storage.add_chat_message("user", user_query)
+            storage.add_chat_message("assistant", answer_text)
 
-        full_text = answer_text + footer
+            footer = f"\n\n🤖 *{res.get('provider').upper()}* (`{res.get('model')}`) • ⏱ {res.get('latency')} сек."
+            if res.get("fallback_occurred"):
+                footer += " _(failover)_"
 
-        if len(full_text) > 4000:
-            for x in range(0, len(full_text), 4000):
-                await msg.answer(full_text[x:x+4000], parse_mode="Markdown")
-            await msg.answer("💬 *Управление диалогом:*", parse_mode="Markdown", reply_markup=get_chat_control_keyboard())
-        else:
-            await msg.answer(full_text, parse_mode="Markdown", reply_markup=get_chat_control_keyboard())
+            await send_safe_reply(msg, answer_text + footer, reply_markup=get_chat_control_keyboard())
+
+        except Exception as e:
+            logger.exception(f"Unhandled error in chat handler: {e}")
+            await send_safe_reply(msg, f"⚠️ Внутренняя ошибка обработчика: {e}")
 
     return r

@@ -31,9 +31,7 @@ async def get_live_openrouter_free_models(api_key: str) -> List[str]:
                 for m in data:
                     mid = m.get("id", "")
                     pricing = m.get("pricing", {})
-                    # Бесплатные модели имеют суффикс :free или нулевую стоимость токенов
                     if mid.endswith(":free") or (pricing.get("prompt") == "0" and pricing.get("completion") == "0"):
-                        # Исключаем устаревшие 70b и 8b, которые стали платными
                         if "llama-3.3-70b" not in mid and "llama-3.1-8b" not in mid:
                             free_slugs.append(mid)
                 if free_slugs:
@@ -44,7 +42,6 @@ async def get_live_openrouter_free_models(api_key: str) -> List[str]:
     except Exception as e:
         logger.warning(f"Не удалось получить живой список моделей OpenRouter: {e}")
 
-    # Запасной список на случай отсутствия связи со списком
     return [
         "google/gemini-2.0-flash-exp:free",
         "google/gemini-2.0-flash-thinking-exp:free",
@@ -68,9 +65,10 @@ POPULAR_MODELS = {
         ("Gemma 2 9B IT", "gemma2-9b-it")
     ],
     "gemini": [
-        ("Gemini 3.5 Flash (Основная)", "gemini-3.5-flash"),
-        ("Gemini 3.5 Flash-Lite (Быстрая)", "gemini-3.5-flash-lite"),
-        ("Gemini 3.5 Pro (Глубокая аналитика)", "gemini-3.5-pro")
+        ("Gemini 2.0 Flash (Рекомендуемая)", "gemini-2.0-flash"),
+        ("Gemini 2.0 Flash-Lite", "gemini-2.0-flash-lite"),
+        ("Gemini 1.5 Flash", "gemini-1.5-flash"),
+        ("Gemini 1.5 Pro", "gemini-1.5-pro")
     ],
     "local": [
         ("Qwen 2.5 7B (LM Studio)", "qwen2.5-7b-instruct")
@@ -84,7 +82,7 @@ class LLMRouter:
         self.active_models = {
             "local": config.local.model or "qwen2.5-7b-instruct",
             "groq": config.groq.model or "llama-3.3-70b-versatile",
-            "gemini": config.gemini.model or "gemini-3.5-flash",
+            "gemini": config.gemini.model or "gemini-2.0-flash",
             "openrouter": config.openrouter.model or "google/gemini-2.0-flash-exp:free"
         }
 
@@ -192,7 +190,8 @@ class LLMRouter:
         user_prompt: str,
         override_system_prompt: Optional[str] = None,
         chat_history: Optional[List[Dict[str, str]]] = None,
-        latest_digest: Optional[str] = None
+        latest_digest: Optional[str] = None,
+        recent_news: Optional[str] = None
     ) -> Dict[str, Any]:
         start_time = time.time()
         providers_to_try = []
@@ -209,19 +208,42 @@ class LLMRouter:
                 providers_to_try.append("openrouter")
         else:
             providers_to_try.append(self.active_provider)
+            # Если выбран конкретный облачный провайдер, но у него нет ключа или он упадет,
+            # добавляем резервные в конец очереди
+            for backup in ["gemini", "groq", "openrouter", "local"]:
+                if backup != self.active_provider and backup not in providers_to_try:
+                    providers_to_try.append(backup)
 
         last_error = None
         for prov in providers_to_try:
             client, initial_model = self._get_client_and_model(prov)
             if not client or not initial_model:
+                last_error = f"Для провайдера {prov.upper()} отсутствует API-ключ в .env"
                 continue
 
+            # Каскадный пул моделей для каждого провайдера
             if prov == "openrouter":
                 live_free = await get_live_openrouter_free_models(self.config.openrouter.api_key)
                 models_to_test = [initial_model]
                 for fb in live_free:
                     if fb not in models_to_test:
                         models_to_test.append(fb)
+            elif prov == "gemini":
+                # Google AI Studio официальные слаги
+                gemini_pool = [
+                    initial_model,
+                    "gemini-2.0-flash",
+                    "gemini-2.0-flash-lite",
+                    "gemini-1.5-flash",
+                    "gemini-1.5-pro"
+                ]
+                models_to_test = []
+                for m in gemini_pool:
+                    if m not in models_to_test:
+                        models_to_test.append(m)
+            elif prov == "groq":
+                groq_pool = [initial_model, "llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
+                models_to_test = [m for m in groq_pool if m]
             else:
                 models_to_test = [initial_model]
 
@@ -233,16 +255,19 @@ class LLMRouter:
                     days = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"]
                     date_context = (
                         f"ТЕКУЩАЯ ДАТА И ВРЕМЯ НА СЕРВЕРЕ: {days[now.weekday()]}, {now.strftime('%d.%m.%Y, %H:%M')}.\n"
-                        f"Ты абсолютно точно знаешь текущую дату, год ({now.year}) и время.\n"
-                        f"Помни: в Telegram не работают решетки ###. Выделяй жирным шрифтом *текст*."
+                        f"Ты абсолютно точно знаешь текущую дату, год ({now.year}) и время."
                     )
                     system_prompt = f"{base_sys_prompt}\n\n{date_context}"
 
+                    # Инъекция контекста новостей (дайджест + свежие статьи из базы)
+                    news_block = ""
                     if latest_digest:
-                        system_prompt += (
-                            f"\n\nСВЕДЕНИЯ ИЗ ПОСЛЕДНЕГО ВЫПУСКА НОВОСТЕЙ СЕРВЕРА:\n"
-                            f"{latest_digest[:4000]}"
-                        )
+                        news_block += f"\n\nСВЕДЕНИЯ ИЗ ПОСЛЕДНЕГО ВЫПУСКА НОВОСТЕЙ СЕРВЕРА:\n{latest_digest[:3000]}"
+                    if recent_news:
+                        news_block += f"\n\nСПИСОК СВЕЖИХ ПУБЛИКАЦИЙ (ТЫ ЗНАЕШЬ ЭТИ СТАТЬИ И МОЖЕШЬ ОБСУЖДАТЬ ИХ):\n{recent_news[:3500]}"
+
+                    if news_block:
+                        system_prompt += news_block
                 else:
                     system_prompt = base_sys_prompt
 
@@ -262,9 +287,9 @@ class LLMRouter:
                     raw_content = resp.choices[0].message.content
                     content = clean_telegram_markdown(raw_content)
 
-                    if prov == "openrouter" and model != initial_model:
-                        logger.info(f"OpenRouter: переключено на рабочую модель {model}.")
-                        self.set_model("openrouter", model)
+                    if model != initial_model:
+                        logger.info(f"Провайдер {prov}: успешно ответила резервная модель {model}. Запоминаем её.")
+                        self.set_model(prov, model)
 
                     elapsed = round(time.time() - start_time, 2)
                     return {
@@ -279,8 +304,8 @@ class LLMRouter:
                     err_msg = str(e)
                     logger.warning(f"Ошибка вызова LLM [{prov}] на модели [{model}]: {err_msg}")
                     last_error = err_msg
-                    # Если модель платная (404) или исчерпан лимит (429), пробуем следующую
-                    if "404" in err_msg or "unavailable for free" in err_msg or "429" in err_msg:
+                    # Если ошибка 404 (модель не найдена или не бесплатна) или 429 (лимит) — пробуем следующую
+                    if "404" in err_msg or "not found" in err_msg.lower() or "unavailable for free" in err_msg or "429" in err_msg:
                         continue
                     else:
                         break
