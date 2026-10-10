@@ -38,6 +38,20 @@ async def download_image_as_input_file(url: str, timeout: float = 8.0) -> Buffer
         logger.warning(f"Не удалось скачать изображение по URL {url}: {e}")
     return None
 
+import asyncio
+
+async def download_images_as_media_group(urls: list, max_count: int = 6) -> list:
+    """Скачивает изображения из разных каналов и формирует альбом для утренней сводки"""
+    if not urls:
+        return []
+    tasks = [download_image_as_input_file(u) for u in urls[:max_count]]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    media_items = []
+    for r in results:
+        if isinstance(r, BufferedInputFile):
+            media_items.append(InputMediaPhoto(media=r))
+    return media_items
+
 class DigestScheduler:
     def __init__(self, scheduler_config: SchedulerConfig, builder: DigestBuilder, bot: Bot, admin_id: int):
         self.config = scheduler_config
@@ -78,57 +92,49 @@ class DigestScheduler:
             greeting = f"☀️ <b>Доброе утро! Ваша аналитическая сводка на 08:50 ({self.timezone_name}):</b>\n\n"
             full_post = greeting + post_html
 
-            # 1. Отправляем фото и структурированный пост (в формате единой фото-карточки или с фото сверху)
-            photo_file = None
-            if lead_img and lead_img.startswith("http"):
-                photo_file = await download_image_as_input_file(lead_img)
+            # 1. Отправляем альбом (медиагруппу) из разных фото/видео источников одним сообщением-коллажем!
+            source_images = res.get("source_images") or ([lead_img] if lead_img else [])
+            media_group = await download_images_as_media_group(source_images, max_count=6)
 
-            sent_as_photo = False
-            if photo_file and len(full_post) <= 1024:
+            if len(media_group) >= 2:
                 try:
-                    await self.bot.send_photo(
+                    await self.bot.send_media_group(target_admin, media=media_group)
+                except Exception as e:
+                    logger.warning(f"Не удалось отправить медиагруппу источников ({e}), пробуем одиночное фото...")
+                    if media_group:
+                        try:
+                            await self.bot.send_photo(target_admin, photo=media_group[0].media)
+                        except Exception:
+                            pass
+            elif len(media_group) == 1:
+                try:
+                    await self.bot.send_photo(target_admin, photo=media_group[0].media)
+                except Exception as e:
+                    logger.warning(f"Не удалось отправить фото источника: {e}")
+            elif lead_img and lead_img.startswith("http"):
+                try:
+                    await self.bot.send_photo(target_admin, photo=lead_img)
+                except Exception:
+                    pass
+
+            # 2. Затем отправляем структурированный текстовый пост
+            try:
+                if len(full_post) > 4000:
+                    for x in range(0, len(full_post), 4000):
+                        await self.bot.send_message(target_admin, full_post[x:x+4000], parse_mode="HTML")
+                    await self.bot.send_message(target_admin, "💬 <b>Действия со сводкой:</b>", parse_mode="HTML", reply_markup=kb)
+                else:
+                    await self.bot.send_message(
                         target_admin,
-                        photo=photo_file,
-                        caption=full_post,
+                        full_post,
                         parse_mode="HTML",
                         reply_markup=kb
                     )
-                    sent_as_photo = True
-                except Exception as e:
-                    logger.warning(f"Не удалось отправить фото-карточку ({e}), отправляем обычным сообщением...")
+            except TelegramBadRequest as e:
+                logger.warning(f"Telegram parse error in morning digest ({e}), sending plain text...")
+                await self.bot.send_message(target_admin, full_post, reply_markup=kb)
 
-            if not sent_as_photo:
-                # Если текст длиннее 1024 символов:
-                # Сначала отправляем реальное фото источников наверх
-                if photo_file:
-                    try:
-                        await self.bot.send_photo(target_admin, photo=photo_file)
-                    except Exception:
-                        pass
-                elif lead_img and lead_img.startswith("http"):
-                    try:
-                        await self.bot.send_photo(target_admin, photo=lead_img)
-                    except Exception:
-                        pass
-
-                # Затем отправляем текстовый пост
-                try:
-                    if len(full_post) > 4000:
-                        for x in range(0, len(full_post), 4000):
-                            await self.bot.send_message(target_admin, full_post[x:x+4000], parse_mode="HTML")
-                        await self.bot.send_message(target_admin, "💬 <b>Действия со сводкой:</b>", parse_mode="HTML", reply_markup=kb)
-                    else:
-                        await self.bot.send_message(
-                            target_admin,
-                            full_post,
-                            parse_mode="HTML",
-                            reply_markup=kb
-                        )
-                except TelegramBadRequest as e:
-                    logger.warning(f"Telegram parse error in morning digest ({e}), sending plain text...")
-                    await self.bot.send_message(target_admin, full_post, reply_markup=kb)
-
-            # 2. Отправляем полноценный .MD документ прямо в Telegram
+            # 3. Отправляем полноценный .MD документ прямо в Telegram
             if md_path and os.path.exists(md_path):
                 today_str = datetime.now().strftime("%d.%m.%Y")
                 doc = FSInputFile(md_path, filename=f"Digest_{today_str}.md")

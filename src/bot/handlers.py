@@ -41,6 +41,20 @@ async def download_image_as_input_file(url: str, timeout: float = 8.0) -> Buffer
         logger.warning(f"Не удалось загрузить изображение {url}: {e}")
     return None
 
+import asyncio
+
+async def download_images_as_media_group(urls: List[str], max_count: int = 6) -> List[InputMediaPhoto]:
+    """Скачивает до max_count изображений из разных каналов и формирует альбом для отправки одним сообщением"""
+    if not urls:
+        return []
+    tasks = [download_image_as_input_file(u) for u in urls[:max_count]]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    media_items = []
+    for r in results:
+        if isinstance(r, BufferedInputFile):
+            media_items.append(InputMediaPhoto(media=r))
+    return media_items
+
 from src.llm.router import LLMRouter
 from src.llm.prompts import markdown_to_telegram_html
 from src.pipeline.digest_builder import DigestBuilder
@@ -316,41 +330,34 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
         # Кнопки под постом: Оценка, Чат, Окно в TG, Скачать MD
         kb = get_digest_feedback_keyboard(web_app_url=get_web_app_url(), md_file_id=md_file_id)
 
-        # 1. Загружаем реальное фото из первоисточников в виде бинарного файла
-        photo_file = None
-        if lead_img and lead_img.startswith("http"):
-            photo_file = await download_image_as_input_file(lead_img)
+        # 1. Загружаем и отправляем альбом (медиагруппу) из разных фото/видео источников одним сообщением-коллажем!
+        source_images = res.get("source_images") or ([lead_img] if lead_img else [])
+        media_group = await download_images_as_media_group(source_images, max_count=6)
 
-        # 2. Если пост до 1024 символов и есть фото — отправляем цельной фото-карточкой (как в канале Дядя Батя!)
-        sent_as_photo = False
-        if photo_file and len(post_html) <= 1024:
+        if len(media_group) >= 2:
             try:
-                await msg.answer_photo(
-                    photo=photo_file,
-                    caption=post_html,
-                    parse_mode="HTML",
-                    reply_markup=kb
-                )
-                sent_as_photo = True
+                # Отправляем единый альбом (коллаж до 6 фото/видео) из разных источников!
+                await msg.answer_media_group(media=media_group)
             except Exception as e:
-                logger.warning(f"Не удалось отправить фото с подписью ({e}), переключаемся на раздельный вывод...")
+                logger.warning(f"Не удалось отправить медиагруппу источников ({e}), пробуем одиночное фото...")
+                if media_group:
+                    try:
+                        await msg.answer_photo(photo=media_group[0].media)
+                    except Exception:
+                        pass
+        elif len(media_group) == 1:
+            try:
+                await msg.answer_photo(photo=media_group[0].media)
+            except Exception as e:
+                logger.warning(f"Ошибка отправки фото: {e}")
+        elif lead_img and lead_img.startswith("http"):
+            try:
+                await msg.answer_photo(photo=lead_img)
+            except Exception:
+                pass
 
-        if not sent_as_photo:
-            # Если текст длиннее 1024 символов:
-            # А. Сначала отправляем реальное фото источников наверх поста
-            if photo_file:
-                try:
-                    await msg.answer_photo(photo=photo_file)
-                except Exception as e:
-                    logger.warning(f"Ошибка отправки фото: {e}")
-            elif lead_img and lead_img.startswith("http"):
-                try:
-                    await msg.answer_photo(photo=lead_img)
-                except Exception:
-                    pass
-
-            # Б. Отправляем структурированный текстовый пост с кнопками
-            await send_safe_reply(msg, post_html, reply_markup=kb)
+        # 2. Отправляем структурированный аналитический пост с интерактивными кнопками
+        await send_safe_reply(msg, post_html, reply_markup=kb)
 
         # 3. Отправляем полноценный .MD файл прямо в Telegram
         if md_path and os.path.exists(md_path):

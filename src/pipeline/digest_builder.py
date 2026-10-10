@@ -346,14 +346,28 @@ class DigestBuilder:
                 "lead_image_url": ""
             }
 
-        # Извлекаем изображения из источников, вошедших в дайджест
+        # Извлекаем разнообразные изображения/обложки видео из разных каналов и лент
         source_images = []
+        seen_channels = set()
         for it in items:
             img = it.get("image_url")
+            ch = it.get("channel", "")
             if img and img.startswith("http") and img not in source_images:
-                source_images.append(img)
-                if len(source_images) >= 4:
-                    break
+                # Отдаем приоритет разнообразию источников
+                if ch not in seen_channels or len(seen_channels) >= 5:
+                    source_images.append(img)
+                    seen_channels.add(ch)
+                    if len(source_images) >= 6:
+                        break
+
+        # Добираем до 6 изображений, если из уникальных каналов набралось меньше
+        if len(source_images) < 4:
+            for it in items:
+                img = it.get("image_url")
+                if img and img.startswith("http") and img not in source_images:
+                    source_images.append(img)
+                    if len(source_images) >= 6:
+                        break
 
         lead_image_url = source_images[0] if source_images else ""
 
