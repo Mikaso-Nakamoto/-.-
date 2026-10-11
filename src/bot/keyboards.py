@@ -51,6 +51,7 @@ def get_search_settings_keyboard(is_darknet: bool, is_google_ai: bool) -> Inline
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=google_label, callback_data=google_cb)],
         [InlineKeyboardButton(text=darknet_label, callback_data=darknet_cb)],
+        [InlineKeyboardButton(text="🛠 Каталог OSINT Framework", callback_data="btn_osint_tools")],
         [InlineKeyboardButton(text="🏠 Главное меню", callback_data="btn_menu")]
     ])
 

@@ -2,11 +2,18 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Системные зависимости для сборки C-модулей если понадобятся
+# Системные зависимости для сборки C-модулей и инструментов OSINT
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
     tzdata \
+    whois \
+    nmap \
+    libimage-exiftool-perl \
+    dnsutils \
+    jq \
+    tesseract-ocr \
+    tesseract-ocr-rus \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .

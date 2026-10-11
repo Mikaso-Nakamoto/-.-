@@ -963,6 +963,28 @@ def build_snowden_menu_text(
         )
         await safe_edit_text(call, text, get_search_settings_keyboard(is_darknet, is_google))
 
+    @r.callback_query(F.data == "btn_osint_tools")
+    async def cb_osint_tools(call: CallbackQuery):
+        from src.pipeline.osint_toolkit import OSINTToolkit
+        tk = OSINTToolkit()
+        catalog = tk.get_framework_tools()
+        lines = [
+            "🛠 <b>Интерактивный каталог инструментов OSINT Framework:</b>\n",
+            "<i>Верифицированные инструменты для глубокой разведки:</i>\n"
+        ]
+        for cat in catalog:
+            lines.append(f"📁 <b>{cat['category']}:</b>")
+            for t in cat["tools"][:4]:
+                lines.append(f"• <a href=\"{t['url']}\"><b>{t['name']}</b></a>: {t['desc']}")
+            lines.append("")
+
+        lines.append("💡 <i>Для автоматического запуска разведки на вашем ПК используйте команду:</i>\n<code>/osint &lt;домен | IP | ник | CVE | телефон | криптокошелек&gt;</code>")
+        back_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Назад к поиску", callback_data="btn_search_menu")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="btn_menu")]
+        ])
+        await safe_edit_text(call, "\n".join(lines), back_kb)
+
     # --------------------------------------------------------------------------
     # Быстрый поиск постов в архиве каналов: /find <текст>
     # --------------------------------------------------------------------------

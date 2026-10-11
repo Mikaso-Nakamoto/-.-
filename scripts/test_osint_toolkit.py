@@ -77,6 +77,26 @@ async def run_osint_tests():
     })
     assert "93.184.216.34" in domain_rep
     assert "api.example.com" in domain_rep
+
+    # Email & Phone report
+    email_rep = toolkit._build_fallback_report("victim@gmail.com", {
+        "type": "email",
+        "registered_services": ["Google", "Twitter", "Spotify"],
+        "mx_records": ["gmail-smtp-in.l.google.com"],
+        "breach_search_links": ["https://haveibeenpwned.com/account/victim@gmail.com"]
+    })
+    assert "Spotify" in email_rep
+    assert "gmail-smtp-in.l.google.com" in email_rep
+
+    phone_rep = toolkit._build_fallback_report("+79991234567", {
+        "type": "phone",
+        "country": "Россия",
+        "carrier": "МегаФон",
+        "search_links": ["https://t.me/+79991234567"]
+    })
+    assert "МегаФон" in phone_rep
+    assert "Россия" in phone_rep
+
     print("✓ Technical OSINT fallback dossiers generated cleanly.")
 
     print("\n=== TEST 6: Intent Router OSINT Integration ===")
