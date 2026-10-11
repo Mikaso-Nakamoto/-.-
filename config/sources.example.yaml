@@ -28,6 +28,10 @@ sources:
       category: "OpenSource & Полезный софт"
     - username: "github_radar"
       category: "GitHub & Разработка"
+    - username: "prepodsteam"
+      category: "Разработка & IT-образование"
+    - username: "bugfeature"
+      category: "Разработка & OpenSource"
 
     # Российские федеральные и новостные каналы (СВО, политика РФ)
     - username: "rian_ru"
@@ -48,6 +52,8 @@ sources:
       category: "Военная хроника & СВО"
     - username: "militarysummaryru"
       category: "Карта СВО & Military Summary"
+    - username: "mod_russia"
+      category: "Минобороны РФ & СВО"
     - username: "infomil_live"
       category: "Военно-техническая аналитика & СВО"
     - username: "medvedev_telegram"

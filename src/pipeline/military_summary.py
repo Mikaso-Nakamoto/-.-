@@ -59,7 +59,7 @@ class MilitarySummaryEngine:
     async def get_frontline_overview(self, storage, llm_router=None) -> Dict[str, Any]:
         """
         Анализирует публикации из подключенных военных каналов пользователя
-        (@militarysummaryru, @Voennaja_svodka, @ross_name, @infomil_live, @rybar)
+        (@militarysummaryru, @mod_russia, @Voennaja_svodka, @ross_name, @infomil_live, @rybar)
         и формирует оперативную карточку фронта со ссылкой на интерактивную карту.
         """
         recent_feed = storage.get_news_feed(limit=250)

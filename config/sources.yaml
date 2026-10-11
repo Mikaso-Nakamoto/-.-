@@ -52,6 +52,12 @@ sources:
     category: Новости Юга & Регионы России
   - username: bbcrussian
     category: Международная аналитика
+  - username: prepodsteam
+    category: Разработка & IT-образование
+  - username: bugfeature
+    category: Разработка & OpenSource
+  - username: mod_russia
+    category: Минобороны РФ & СВО
   rss_feeds:
   - url: https://rostov.tsargrad.tv/rss
     name: Царьград Ростов
