@@ -55,6 +55,19 @@ class AIIntentRouter:
                 "reason": "Запрос формирования дайджеста / сводки"
             }
 
+        # 2.1 Оперативные ситуационные запросы ("ситуация в Киеве сейчас", "обстановка в Белгороде") -> deep_search
+        situation_pat = r'(?i)\b(?:ситуаци[яиею]|обстановк[аеу]|что\s+(?:сейчас\s+)?происходит|какие\s+новости\s+(?:по|в|на)|последние\s+новости\s+(?:по|в|на))\b'
+        if re.search(situation_pat, q_low):
+            clean_q, targets = self.semantic_engine.extract_search_intent(raw)
+            return {
+                "action": "deep_search",
+                "clean_query": clean_q or raw,
+                "target_channels": targets,
+                "include_darknet": False,
+                "confidence": 0.95,
+                "reason": "Запрос текущей оперативной обстановки (Deep Search)"
+            }
+
         # 3. Запрос поиска конкретного поста в Telegram-каналах
         find_triggers = [
             r'в\s+каком[- ]то\s+посте',

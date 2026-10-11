@@ -436,7 +436,11 @@ class DigestBuilder:
 """
         return html_template
 
-    async def generate_digest(self, force_all: bool = False, on_progress: Any = None) -> Dict[str, Any]:
+    async def build_digest(self, custom_query: Optional[str] = None, force_all: bool = False, on_progress: Any = None) -> Dict[str, Any]:
+        """Совместимый шлюз для вызова генерации дайджеста/сводки"""
+        return await self.generate_digest(force_all=force_all, on_progress=on_progress, custom_query=custom_query)
+
+    async def generate_digest(self, force_all: bool = False, on_progress: Any = None, custom_query: Optional[str] = None) -> Dict[str, Any]:
         if on_progress:
             try:
                 await on_progress("📡 <b>[1/4] Сбор публикаций...</b>\n<i>Опрашиваю Telegram-каналы и RSS-ленты... ⠋</i>")
@@ -445,11 +449,22 @@ class DigestBuilder:
 
         items = await self.collect_fresh_news()
 
+        # Если задан тематический запрос — фильтруем публикации по смыслу
+        if custom_query and items:
+            try:
+                from src.pipeline.semantic_search import SemanticSearchEngine
+                se = SemanticSearchEngine()
+                matched = await se.search_posts(custom_query, items, limit=15)
+                if matched:
+                    items = matched
+            except Exception as fe:
+                logger.debug(f"Custom query filter error in digest: {fe}")
+
         if not items:
             return {
                 "success": True,
-                "text": "📭 Нет новых непрочитанных новостей по вашим темам.",
-                "telegram_post_html": "📭 Нет новых непрочитанных новостей по вашим темам.",
+                "text": "📭 Нет новых публикаций по вашему запросу.",
+                "telegram_post_html": "📭 Нет новых публикаций по вашему запросу.",
                 "provider": "none",
                 "items_count": 0,
                 "lead_image_url": ""

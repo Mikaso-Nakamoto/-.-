@@ -36,6 +36,9 @@ def markdown_to_telegram_html(text: str) -> str:
     text = re.sub(r'(?:\s*&lt;&gt;\s*|\s*<>\s*)+', '\n', text)
     text = re.sub(r'\[([^\]]*)\]\((?:https?://)?\)', r'\1', text)
 
+    # 0.2 Устранение двойного HTML-экранирования (&amp;amp; -> &, &amp;quot; -> ")
+    text = text.replace("&amp;amp;", "&").replace("&amp;quot;", '"').replace("&amp;lt;", "<").replace("&amp;gt;", ">")
+
     # 1. Сохраняем блоки кода ```lang ... ```
     code_blocks = []
     def save_pre(m):
@@ -283,6 +286,7 @@ def extract_clean_digest_post(raw_text: str, date_str: str) -> str:
     parts = re.split(section_split_pattern, cleaned_no_tables)
 
     items = []
+    seen_bodies = set()
     if len(parts) >= 3:
         num = 0
         for i in range(1, len(parts), 2):
@@ -296,13 +300,19 @@ def extract_clean_digest_post(raw_text: str, date_str: str) -> str:
             ]):
                 continue
 
+            # Дедупликация: не допускаем повторного вывода одной и той же новости/цитаты в разных разделах
+            norm_content = re.sub(r'[^а-яa-z0-9]+', '', sec_body.lower())
+            if norm_content and len(norm_content) > 20:
+                if norm_content in seen_bodies:
+                    continue
+                seen_bodies.add(norm_content)
+
             c_num = CIRCLED_NUMS[num] if num < len(CIRCLED_NUMS) else f"[{num+1}]"
             num += 1
 
             clean_title = re.sub(r'^\s*[\*#]+\s*', '', sec_title)
             clean_title = re.sub(r'\s*[\*#]+\s*$', '', clean_title)
             clean_title = re.sub(r'^\s*\d+[\.\)]\s*', '', clean_title).strip()
-            clean_title = html.escape(clean_title)
 
             # Форматируем текст секции через надежный markdown_to_telegram_html
             body_html = markdown_to_telegram_html(sec_body)
