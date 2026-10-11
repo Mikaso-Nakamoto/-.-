@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import socket
 import urllib.parse
 from typing import Dict, Any, List, Optional, Tuple
@@ -22,14 +23,15 @@ class OSINTToolkit:
     """
     Автономный модульный комплекс OSINT-разведки (по стандартам OSINT Framework / osintframework.com).
     Выполняет разведку по открытым источникам (OSINT) локально на машине пользователя:
-    1. Сетевая инфраструктура и домены (DNS, RDAP, субдомены crt.sh, HTTP-стек, открытые порты).
-    2. IP-адреса и сетевые узлы (Reverse DNS, GeoIP, ASN, сканирование ключевых портов).
-    3. Никнеймы и цифровой след (многоплатформенный чекер аккаунтов Sherlock/Maigret style).
-    4. Архивы и история изменений (Wayback Machine).
-    5. Автоматическая генерация Google/Yandex Dorks.
-    6. Криптовалютные кошельки (BTC, ETH, TRC-20 USDT).
-    7. Уязвимости CVE и Cyber Threat Intelligence (CTI).
-    8. Интегрированный справочник специализированных инструментов OSINT Framework.
+    1. Сетевая инфраструктура и домены (DNS, RDAP, субдомены crt.sh/subfinder, HTTP-стек, открытые порты).
+    2. IP-адреса и сетевые узлы (Reverse DNS, GeoIP, ASN, nmap/сканирование портов).
+    3. Никнеймы и цифровой след (многоплатформенный чекер аккаунтов Maigret / Sherlock style).
+    4. Почты и Телефоны (Holehe 120+ сервисов, phonenumbers).
+    5. Архивы и история изменений (Wayback Machine).
+    6. Автоматическая генерация Google/Yandex Dorks.
+    7. Криптовалютные кошельки (BTC, ETH, TRC-20 USDT).
+    8. Уязвимости CVE и Cyber Threat Intelligence (CTI).
+    9. Интегрированный справочник специализированных инструментов OSINT Framework.
     """
 
     def __init__(self, trust_manager: Optional[TrustManager] = None):
@@ -99,22 +101,40 @@ class OSINTToolkit:
                 except Exception:
                     pass
 
-            # 3. Субдомены через Certificate Transparency (crt.sh)
-            try:
-                crt_url = f"https://crt.sh/?q=%25.{domain}&output=json"
-                crt_resp = await client.get(crt_url)
-                if crt_resp.status_code == 200:
-                    entries = crt_resp.json()
-                    subdomains = set()
-                    for entry in entries[:50]:
-                        name_val = entry.get("name_value", "")
-                        for sub in name_val.split("\n"):
-                            sub = sub.strip().lower()
-                            if sub and "*" not in sub and sub != domain:
-                                subdomains.add(sub)
-                    data["subdomains"] = sorted(list(subdomains))[:15]
-            except Exception:
-                pass
+            # 3. Субдомены через Subfinder (если установлен) или Certificate Transparency (crt.sh)
+            subfinder_bin = shutil.which("subfinder")
+            if subfinder_bin:
+                try:
+                    proc = await asyncio.create_subprocess_exec(
+                        subfinder_bin, "-d", domain, "-silent",
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.DEVNULL
+                    )
+                    stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=12.0)
+                    if stdout:
+                        for s in stdout.decode().splitlines():
+                            s = s.strip()
+                            if s and s != domain and s not in data["subdomains"]:
+                                data["subdomains"].append(s)
+                except Exception:
+                    pass
+
+            if not data["subdomains"]:
+                try:
+                    crt_url = f"https://crt.sh/?q=%25.{domain}&output=json"
+                    crt_resp = await client.get(crt_url)
+                    if crt_resp.status_code == 200:
+                        entries = crt_resp.json()
+                        subdomains = set()
+                        for entry in entries[:50]:
+                            name_val = entry.get("name_value", "")
+                            for sub in name_val.split("\n"):
+                                sub = sub.strip().lower()
+                                if sub and "*" not in sub and sub != domain:
+                                    subdomains.add(sub)
+                        data["subdomains"] = sorted(list(subdomains))[:15]
+                except Exception:
+                    pass
 
             # 4. RDAP (WHOIS нового поколения)
             try:
@@ -168,7 +188,7 @@ class OSINTToolkit:
     # 2. Разведка IP-адресов и сетевых узлов (IP OSINT)
     # =========================================================================
     async def investigate_ip(self, ip: str, timeout: float = 6.0) -> Dict[str, Any]:
-        """Комплексная разведка IP-адреса: GeoIP, ASN, PTR, сканирование ключевых портов"""
+        """Комплексная разведка IP-адреса: GeoIP, ASN, PTR, nmap/сканирование ключевых портов"""
         ip = ip.strip()
         data: Dict[str, Any] = {
             "entity": ip,
@@ -176,6 +196,7 @@ class OSINTToolkit:
             "hostname": None,
             "geoip": {},
             "open_ports": [],
+            "nmap_services": [],
             "reputation_links": {
                 "AbuseIPDB": f"https://www.abuseipdb.com/check/{ip}",
                 "Shodan": f"https://www.shodan.io/host/{ip}",
@@ -209,70 +230,113 @@ class OSINTToolkit:
             except Exception:
                 pass
 
-        # 3. Быстрая проверка стандартных портов (асинхронно с низким таймаутом)
-        target_ports = [21, 22, 25, 53, 80, 443, 3306, 3389, 8080]
-        async def check_port(port: int):
+        # 3. Nmap (если установлен) или быстрый асинхронный сокет-скан
+        nmap_bin = shutil.which("nmap")
+        if nmap_bin:
             try:
-                conn = asyncio.open_connection(ip, port)
-                _, writer = await asyncio.wait_for(conn, timeout=1.2)
-                writer.close()
-                await writer.wait_closed()
-                return port
+                proc = await asyncio.create_subprocess_exec(
+                    nmap_bin, "-sV", "--open", "-T4", "-F", ip,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.DEVNULL
+                )
+                stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=12.0)
+                if stdout:
+                    lines = stdout.decode().splitlines()
+                    for line in lines:
+                        m = re.match(r'^(\d+)/(tcp|udp)\s+open\s+(\S+)\s*(.*)', line)
+                        if m:
+                            port_num = int(m.group(1))
+                            service = m.group(3)
+                            ver = m.group(4).strip()
+                            data["nmap_services"].append({"port": port_num, "service": service, "version": ver})
+                            if port_num not in data["open_ports"]:
+                                data["open_ports"].append(port_num)
             except Exception:
-                return None
+                pass
 
-        tasks = [check_port(p) for p in target_ports]
-        port_results = await asyncio.gather(*tasks, return_exceptions=True)
-        data["open_ports"] = [p for p in port_results if isinstance(p, int)]
+        if not data["open_ports"]:
+            target_ports = [21, 22, 25, 53, 80, 443, 3306, 3389, 8080]
+            async def check_port(port: int):
+                try:
+                    conn = asyncio.open_connection(ip, port)
+                    _, writer = await asyncio.wait_for(conn, timeout=1.2)
+                    writer.close()
+                    await writer.wait_closed()
+                    return port
+                except Exception:
+                    return None
+
+            tasks = [check_port(p) for p in target_ports]
+            port_results = await asyncio.gather(*tasks, return_exceptions=True)
+            data["open_ports"] = [p for p in port_results if isinstance(p, int)]
 
         return data
 
     # =========================================================================
-    # 3. Разведка никнеймов и цифрового следа (Username OSINT / Sherlock style)
+    # 3. Разведка никнеймов и цифрового следа (Username OSINT / Maigret / Sherlock)
     # =========================================================================
     async def investigate_username(self, username: str, timeout: float = 5.0) -> Dict[str, Any]:
-        """Проверка присутствия никнейма по 12+ популярным платформам"""
+        """Проверка присутствия никнейма по Maigret (если установлен) или по 12+ популярным платформам"""
         username = username.strip().lstrip("@")
-        platforms = [
-            ("GitHub", f"https://api.github.com/users/{username}", f"https://github.com/{username}"),
-            ("Telegram", f"https://t.me/{username}", f"https://t.me/{username}"),
-            ("VKontakte", f"https://vk.com/{username}", f"https://vk.com/{username}"),
-            ("Reddit", f"https://www.reddit.com/user/{username}/about.json", f"https://www.reddit.com/user/{username}"),
-            ("Steam", f"https://steamcommunity.com/id/{username}", f"https://steamcommunity.com/id/{username}"),
-            ("Habr", f"https://habr.com/ru/users/{username}/", f"https://habr.com/ru/users/{username}/"),
-            ("Docker Hub", f"https://hub.docker.com/v2/users/{username}", f"https://hub.docker.com/u/{username}"),
-            ("Pastebin", f"https://pastebin.com/u/{username}", f"https://pastebin.com/u/{username}"),
-            ("Keybase", f"https://keybase.io/{username}", f"https://keybase.io/{username}"),
-            ("GitLab", f"https://gitlab.com/{username}", f"https://gitlab.com/{username}"),
-            ("Medium", f"https://medium.com/@{username}", f"https://medium.com/@{username}"),
-        ]
-
         found_profiles: List[Dict[str, str]] = []
 
-        headers = {"User-Agent": USER_AGENT}
-        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, headers=headers) as client:
-            async def probe(name: str, check_url: str, profile_url: str):
-                try:
-                    r = await client.get(check_url)
-                    if r.status_code == 200:
-                        # Специфические фильтры чтобы отсечь ложные срабатывания (например, страницы с заглушкой 404 в теле)
-                        if name == "Telegram" and "tgme_page_title" not in r.text:
-                            return None
-                        if name == "Steam" and "The specified profile could not be found" in r.text:
-                            return None
-                        if name == "VKontakte" and ("Страница удалена" in r.text or "Страница заблокирована" in r.text):
-                            return None
-                        if name == "Reddit" and r.json().get("error") == 404:
-                            return None
-                        return {"platform": name, "url": profile_url}
-                except Exception:
-                    return None
+        # 1. Если установлен CLI инструмент Maigret (3000+ сайтов)
+        maigret_bin = shutil.which("maigret")
+        if maigret_bin:
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    maigret_bin, username, "--timeout", "5", "--top-sites", "150", "--json", "-",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.DEVNULL
+                )
+                stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=18.0)
+                if stdout:
+                    m_data = json.loads(stdout.decode())
+                    for site_name, s_info in m_data.items():
+                        if s_info.get("status") == "Claimed" and s_info.get("url_user"):
+                            found_profiles.append({"platform": site_name, "url": s_info["url_user"]})
+            except Exception as me:
+                logger.debug(f"Maigret execution failed or timed out: {me}")
 
-            tasks = [probe(p[0], p[1], p[2]) for p in platforms]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            for it in results:
-                if isinstance(it, dict) and it:
-                    found_profiles.append(it)
+        # 2. Встроенный быстрый зонд по ключевым сетям
+        if not found_profiles:
+            platforms = [
+                ("GitHub", f"https://api.github.com/users/{username}", f"https://github.com/{username}"),
+                ("Telegram", f"https://t.me/{username}", f"https://t.me/{username}"),
+                ("VKontakte", f"https://vk.com/{username}", f"https://vk.com/{username}"),
+                ("Reddit", f"https://www.reddit.com/user/{username}/about.json", f"https://www.reddit.com/user/{username}"),
+                ("Steam", f"https://steamcommunity.com/id/{username}", f"https://steamcommunity.com/id/{username}"),
+                ("Habr", f"https://habr.com/ru/users/{username}/", f"https://habr.com/ru/users/{username}/"),
+                ("Docker Hub", f"https://hub.docker.com/v2/users/{username}", f"https://hub.docker.com/u/{username}"),
+                ("Pastebin", f"https://pastebin.com/u/{username}", f"https://pastebin.com/u/{username}"),
+                ("Keybase", f"https://keybase.io/{username}", f"https://keybase.io/{username}"),
+                ("GitLab", f"https://gitlab.com/{username}", f"https://gitlab.com/{username}"),
+                ("Medium", f"https://medium.com/@{username}", f"https://medium.com/@{username}"),
+            ]
+
+            headers = {"User-Agent": USER_AGENT}
+            async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, headers=headers) as client:
+                async def probe(name: str, check_url: str, profile_url: str):
+                    try:
+                        r = await client.get(check_url)
+                        if r.status_code == 200:
+                            if name == "Telegram" and "tgme_page_title" not in r.text:
+                                return None
+                            if name == "Steam" and "The specified profile could not be found" in r.text:
+                                return None
+                            if name == "VKontakte" and ("Страница удалена" in r.text or "Страница заблокирована" in r.text):
+                                return None
+                            if name == "Reddit" and r.json().get("error") == 404:
+                                return None
+                            return {"platform": name, "url": profile_url}
+                    except Exception:
+                        return None
+
+                tasks = [probe(p[0], p[1], p[2]) for p in platforms]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                for it in results:
+                    if isinstance(it, dict) and it:
+                        found_profiles.append(it)
 
         return {
             "entity": username,
@@ -287,7 +351,98 @@ class OSINTToolkit:
         }
 
     # =========================================================================
-    # 4. Разведка уязвимостей CVE (Cyber Threat Intelligence)
+    # 4. Разведка по Email (Holehe 120+ сервисов и MX-записи)
+    # =========================================================================
+    async def investigate_email(self, email: str, timeout: float = 8.0) -> Dict[str, Any]:
+        """Разведка по Email: проверка привязки к 120+ сервисам через Holehe и MX-записи"""
+        email = email.strip().lower()
+        domain = email.split("@")[-1] if "@" in email else ""
+        data: Dict[str, Any] = {
+            "entity": email,
+            "type": "email",
+            "domain": domain,
+            "registered_services": [],
+            "mx_records": [],
+            "breach_search_links": [
+                f"https://haveibeenpwned.com/account/{urllib.parse.quote(email)}",
+                f"https://leakcheck.io/search?type=email&query={urllib.parse.quote(email)}",
+                f"https://dehashed.com/search?query={urllib.parse.quote(email)}"
+            ]
+        }
+
+        # 1. Если установлен CLI инструмент Holehe (120+ сервисов)
+        holehe_bin = shutil.which("holehe")
+        if holehe_bin:
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    holehe_bin, email, "--only-used", "--no-color",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.DEVNULL
+                )
+                stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=18.0)
+                if stdout:
+                    for line in stdout.decode().splitlines():
+                        if "[+]" in line:
+                            clean_svc = re.sub(r'\[\+\]\s*', '', line).strip()
+                            data["registered_services"].append(clean_svc)
+            except Exception as he:
+                logger.debug(f"Holehe execution error: {he}")
+
+        # 2. DNS MX records для домена почты
+        if domain:
+            try:
+                async with httpx.AsyncClient(timeout=timeout) as client:
+                    doh_url = f"https://dns.google/resolve?name={domain}&type=MX"
+                    r = await client.get(doh_url)
+                    if r.status_code == 200:
+                        answers = r.json().get("Answer", [])
+                        data["mx_records"] = [a.get("data") for a in answers if "data" in a][:4]
+            except Exception:
+                pass
+
+        return data
+
+    # =========================================================================
+    # 5. Разведка по номеру телефона (Phone OSINT / phonenumbers)
+    # =========================================================================
+    async def investigate_phone(self, phone: str) -> Dict[str, Any]:
+        """Разведка по номеру телефона: форматирование, страна, оператор, ссылки на проверку"""
+        clean_phone = re.sub(r'[^\d+]', '', phone.strip())
+        if not clean_phone.startswith("+"):
+            if clean_phone.startswith("8") and len(clean_phone) == 11:
+                clean_phone = "+7" + clean_phone[1:]
+            elif clean_phone.startswith("7") and len(clean_phone) == 11:
+                clean_phone = "+" + clean_phone
+
+        data: Dict[str, Any] = {
+            "entity": clean_phone,
+            "type": "phone",
+            "country": None,
+            "carrier": None,
+            "valid": True,
+            "search_links": [
+                f"https://t.me/+{clean_phone.lstrip('+')}",
+                f"https://api.whatsapp.com/send?phone={clean_phone.lstrip('+')}",
+                f"https://www.google.com/search?q=\"{urllib.parse.quote(clean_phone)}\"",
+                f"https://yandex.ru/search/?text=\"{urllib.parse.quote(clean_phone)}\"",
+                f"https://sync.me/search/?number={clean_phone.lstrip('+')}"
+            ]
+        }
+
+        try:
+            import phonenumbers
+            from phonenumbers import geocoder, carrier
+            parsed = phonenumbers.parse(clean_phone, None)
+            data["valid"] = phonenumbers.is_valid_number(parsed)
+            data["country"] = geocoder.description_for_number(parsed, "ru") or geocoder.description_for_number(parsed, "en")
+            data["carrier"] = carrier.name_for_number(parsed, "ru") or carrier.name_for_number(parsed, "en")
+        except Exception:
+            pass
+
+        return data
+
+    # =========================================================================
+    # 6. Разведка уязвимостей CVE (Cyber Threat Intelligence)
     # =========================================================================
     async def investigate_cve(self, cve_id: str, timeout: float = 6.0) -> Dict[str, Any]:
         """Поиск характеристик уязвимости CVE и эксплойтов"""
@@ -328,7 +483,7 @@ class OSINTToolkit:
         return data
 
     # =========================================================================
-    # 5. Разведка криптовалютных адресов (Blockchain OSINT)
+    # 7. Разведка криптовалютных адресов (Blockchain OSINT)
     # =========================================================================
     def investigate_crypto(self, address: str) -> Dict[str, Any]:
         """Анализ блокчейн-адреса и привязка к эксплорерам"""
@@ -365,7 +520,7 @@ class OSINTToolkit:
         }
 
     # =========================================================================
-    # 6. Генератор профессиональных Google / Yandex Dorks
+    # 8. Генератор профессиональных Google / Yandex Dorks
     # =========================================================================
     @staticmethod
     def generate_dorks(target: str) -> List[Dict[str, str]]:
@@ -395,7 +550,7 @@ class OSINTToolkit:
         ]
 
     # =========================================================================
-    # 7. Каталог инструментов OSINT Framework (Knowledge Directory)
+    # 9. Каталог инструментов OSINT Framework (Knowledge Directory)
     # =========================================================================
     @staticmethod
     def get_framework_tools(category: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -434,7 +589,8 @@ class OSINTToolkit:
                 "category": "Social & People (Люди, никнеймы, социальные сети)",
                 "tools": [
                     {"name": "Maigret / Sherlock", "desc": "Автоматический поиск аккаунтов по никнейму на 500+ сайтах и форумах", "url": "https://github.com/soxoj/maigret"},
-                    {"name": "Epieos", "desc": "Разведка по Email (Google, Skype, LinkedIn) без отправки оповещений цели", "url": "https://epieos.com/"},
+                    {"name": "Holehe", "desc": "Проверка привязки Email к 120+ сервисам без уведомления цели", "url": "https://github.com/megadose/holehe"},
+                    {"name": "Epieos", "desc": "Разведка по Email (Google, Skype, LinkedIn) без отправки оповещений", "url": "https://epieos.com/"},
                     {"name": "Telepathy", "desc": "OSINT по открытым Telegram-чатам, каналам и связям участников", "url": "https://github.com/jordanwildon/Telepathy"}
                 ]
             },
@@ -455,7 +611,7 @@ class OSINTToolkit:
         return [c for c in catalog if cat_low in c["category"].lower()]
 
     # =========================================================================
-    # 8. Главный исполнитель разведки (Execute Investigation)
+    # 10. Главный исполнитель разведки (Execute Investigation)
     # =========================================================================
     async def investigate(self, target: str, entity_type: Optional[str] = None) -> Dict[str, Any]:
         """Запускает разведку по определенному типу сущности"""
@@ -468,12 +624,15 @@ class OSINTToolkit:
             return await self.investigate_domain(clean_target)
         elif etype == "username":
             return await self.investigate_username(clean_target)
+        elif etype == "email":
+            return await self.investigate_email(clean_target)
+        elif etype == "phone":
+            return await self.investigate_phone(clean_target)
         elif etype == "crypto":
             return self.investigate_crypto(clean_target)
         elif etype == "cve":
             return await self.investigate_cve(clean_target)
         else:
-            # Для общих тем возвращаем каталог инструментов и поисковые дорки
             return {
                 "entity": clean_target,
                 "type": "general",
@@ -482,7 +641,7 @@ class OSINTToolkit:
             }
 
     # =========================================================================
-    # 9. Интеллектуальный синтез отчета нейросетью (AI OSINT Synthesis)
+    # 11. Интеллектуальный синтез отчета нейросетью (AI OSINT Synthesis)
     # =========================================================================
     async def synthesize_report(self, target: str, raw_data: Dict[str, Any], llm_router: Optional[LLMRouter] = None) -> str:
         """Синтезирует профессиональный OSINT-отчет с помощью локальной/облачной нейросети"""
@@ -541,7 +700,7 @@ class OSINTToolkit:
                 lines.append(f"• Создан: <i>{rd.get('created', 'Н/Д')}</i> | Истекает: <i>{rd.get('expires', 'Н/Д')}</i>")
             subs = data.get("subdomains", [])
             if subs:
-                lines.append(f"\n🔍 <b>Обнаруженные субдомены (crt.sh):</b>\n" + "\n".join([f"• <code>{s}</code>" for s in subs[:8]]))
+                lines.append(f"\n🔍 <b>Обнаруженные субдомены (crt.sh/subfinder):</b>\n" + "\n".join([f"• <code>{s}</code>" for s in subs[:8]]))
             dorks = data.get("dorks", [])
             if dorks:
                 lines.append("\n🔎 <b>Готовые Google Dorks для цели:</b>")
@@ -558,7 +717,10 @@ class OSINTToolkit:
                 lines.append(f"• Reverse DNS (PTR): <code>{html.escape(data['hostname'])}</code>")
             ports = data.get("open_ports", [])
             if ports:
-                lines.append(f"• Открытые стандартные порты: <b>{', '.join(map(str, ports))}</b>")
+                lines.append(f"• Открытые порты: <b>{', '.join(map(str, ports))}</b>")
+            services = data.get("nmap_services", [])
+            if services:
+                lines.append("• Службы (Nmap): " + ", ".join([f"<code>{s['port']} ({s['service']})</code>" for s in services[:5]]))
             lines.append("\n🔗 <b>Внешние реестры репутации:</b>")
             for name, url in data.get("reputation_links", {}).items():
                 lines.append(f"• <a href=\"{url}\">{name}</a>")
@@ -571,7 +733,30 @@ class OSINTToolkit:
                 for p in profiles:
                     lines.append(f"• <b>{p['platform']}:</b> <a href=\"{p['url']}\">{p['url']}</a>")
             else:
-                lines.append("<i>Прямых открытых совпадений по базовым 12 платформам не обнаружено.</i>")
+                lines.append("<i>Прямых открытых совпадений по базовым платформам не обнаружено.</i>")
+
+        elif t == "email":
+            lines.append(f"📧 <b>Анализ Email-адреса:</b> <code>{html.escape(target)}</code>")
+            svcs = data.get("registered_services", [])
+            if svcs:
+                lines.append(f"✅ Обнаружены регистрации на сервисах ({len(svcs)}):\n" + "\n".join([f"• <b>{s}</b>" for s in svcs]))
+            else:
+                lines.append("<i>Holehe не зафиксировал открытых привязок или утилита не установлена.</i>")
+            if data.get("mx_records"):
+                lines.append(f"• Почтовые серверы MX: <code>{', '.join(data['mx_records'][:3])}</code>")
+            lines.append("\n🔗 <b>Проверка по базам утечек:</b>")
+            for b_link in data.get("breach_search_links", []):
+                lines.append(f"• <a href=\"{b_link}\">{urllib.parse.urlparse(b_link).netloc}</a>")
+
+        elif t == "phone":
+            lines.append(f"📱 <b>Анализ телефонного номера:</b> <code>{html.escape(target)}</code>")
+            if data.get("country"):
+                lines.append(f"• Страна / Регион: <b>{data.get('country')}</b>")
+            if data.get("carrier"):
+                lines.append(f"• Оператор связи: <b>{data.get('carrier')}</b>")
+            lines.append("\n🔗 <b>Поиск в мессенджерах и поисковиках:</b>")
+            for link in data.get("search_links", []):
+                lines.append(f"• <a href=\"{link}\">{urllib.parse.urlparse(link).netloc}</a>")
 
         elif t == "cve":
             lines.append(f"🚨 <b>Уязвимость информационной безопасности:</b>")
