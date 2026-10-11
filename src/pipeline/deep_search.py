@@ -218,6 +218,7 @@ class DeepSearchEngine:
         hdrs = headers or {"User-Agent": USER_AGENT}
         news_url = f"https://news.google.com/rss/search?q={urllib.parse.quote(query)}&hl=ru&gl=RU&ceid=RU:ru"
         results = []
+        q_tokens = [w.lower() for w in re.findall(r'[а-яА-Яa-zA-Z0-9]+', query) if len(w) > 3]
 
         for cfg in configs:
             try:
@@ -225,13 +226,16 @@ class DeepSearchEngine:
                     resp = await client.get(news_url)
                     if resp.status_code == 200 and resp.text:
                         root = ET.fromstring(resp.text)
-                        for item in root.findall(".//item")[:limit]:
+                        for item in root.findall(".//item")[:limit * 3]:
                             tit = item.findtext("title", "")
                             link = item.findtext("link", "")
                             source_tag = item.find("source")
                             source_name = source_tag.text if source_tag is not None else "СМИ"
                             pub_date = item.findtext("pubDate", "")
                             if tit and link:
+                                # Исключаем дефолтные общие сводки Google News, если в новости нет ни одного ключевого слова запроса
+                                if q_tokens and not any(t in tit.lower() for t in q_tokens):
+                                    continue
                                 results.append({
                                     "title": f"{source_name}: {tit}",
                                     "url": link,
@@ -240,10 +244,88 @@ class DeepSearchEngine:
                                     "trust_badge": f"🌐 [{source_name}]",
                                     "trust_score": 75
                                 })
+                                if len(results) >= limit:
+                                    break
                         if results:
                             break
             except Exception as e:
                 logger.debug(f"Google News RSS search error ({cfg}): {e}")
+
+        return results
+
+    async def _search_github_repos(
+        self,
+        query: str,
+        limit: int = 4,
+        client_configs: Optional[List[Dict[str, Any]]] = None,
+        headers: Optional[Dict[str, str]] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Поиск открытых репозиториев, библиотек и инструментов на GitHub через официальный Search API.
+        """
+        q_low = query.lower()
+        terms = []
+        if any(w in q_low for w in ["вирус", "вредонос", "malware", "троян", "малвар"]):
+            terms.append("malware samples OR malware analysis")
+        if any(w in q_low for w in ["эксплойт", "exploit", "cve", "0-day", "poc"]):
+            terms.append("exploit OR poc")
+        if any(w in q_low for w in ["библиотек", "library", "коллекци"]):
+            terms.append("library OR collection")
+        if any(w in q_low for w in ["osint", "разведк"]):
+            terms.append("osint tool")
+        if any(w in q_low for w in ["парсер", "scraper", "crawler"]):
+            terms.append("scraper OR parser")
+
+        latin_words = [w for w in re.findall(r'[a-zA-Z0-9_-]+', query) if w.lower() not in ["github", "git", "repo", "repository"]]
+        if latin_words:
+            gh_term = " ".join(latin_words)
+        elif terms:
+            gh_term = " ".join(terms)
+        else:
+            stop_ru = {"гитхаб", "github", "репозиторий", "репозитории", "репо", "библиотека", "библиотеки", "с", "для", "по", "на", "про"}
+            ru_words = [w for w in re.findall(r'[а-яА-Яa-zA-Z0-9]+', query) if w.lower() not in stop_ru]
+            gh_term = " ".join(ru_words) if ru_words else query
+
+        api_url = f"https://api.github.com/search/repositories?q={urllib.parse.quote(gh_term)}&sort=stars&order=desc&per_page={limit}"
+        configs = client_configs or [{"verify": False}, {}]
+        hdrs = {
+            "User-Agent": "Snowden-Agent/1.0",
+            "Accept": "application/vnd.github.v3+json"
+        }
+
+        results = []
+        for cfg in configs:
+            try:
+                async with httpx.AsyncClient(timeout=8.0, headers=hdrs, **cfg) as client:
+                    resp = await client.get(api_url)
+                    items = resp.json().get("items", []) if resp.status_code == 200 else []
+
+                    # Если по сложной фразе 0 находок — пробуем по первому ключевому латинскому термину
+                    if not items and len(gh_term.split()) > 1:
+                        first_term = gh_term.split()[0]
+                        alt_url = f"https://api.github.com/search/repositories?q={urllib.parse.quote(first_term)}&sort=stars&order=desc&per_page={limit}"
+                        alt_resp = await client.get(alt_url)
+                        if alt_resp.status_code == 200:
+                            items = alt_resp.json().get("items", [])
+
+                    for it in items[:limit]:
+                        full_name = it.get("full_name", "")
+                        html_url = it.get("html_url", "")
+                        desc = it.get("description") or "Описание отсутствует"
+                        stars = it.get("stargazers_count", 0)
+                        lang = it.get("language") or "Multi"
+                        results.append({
+                            "title": f"GitHub: {full_name} (⭐ {stars:,})",
+                            "url": html_url,
+                            "snippet": f"Репозиторий {full_name} [{lang}] (⭐ {stars:,}): {desc}",
+                            "source_type": "github_repo",
+                            "trust_badge": "📦 [GitHub Repo / Open Source]",
+                            "trust_score": 90
+                        })
+                    if results:
+                        break
+            except Exception as e:
+                logger.debug(f"GitHub search error ({cfg}): {e}")
 
         return results
 
@@ -417,6 +499,16 @@ class DeepSearchEngine:
         if self.xray_http_proxy:
             client_configs.append({"proxy": self.xray_http_proxy, "timeout": timeout})
         client_configs.append({"timeout": timeout})
+
+        # 1.5. Поиск по GitHub Repositories (если запрос касается GitHub, репозиториев, кода, библиотек)
+        is_gh_intent = any(w in query.lower() for w in ["github", "гитхаб", "репозитори", "репо", "библиотек", "исходн", "source code", "open source", "скрипт", "tools", "утилит"])
+        if is_gh_intent and len(results) < limit:
+            try:
+                gh_res = await self._search_github_repos(query, limit=limit, client_configs=client_configs, headers=headers)
+                if gh_res:
+                    results.extend(gh_res)
+            except Exception as ge:
+                logger.debug(f"GitHub repos collector error: {ge}")
 
         # 2. Полнотекстовый поиск Википедии + Lead Extracts
         try:
@@ -860,12 +952,13 @@ class DeepSearchEngine:
             "   - Структурированные пункты проверенных фактов: официальные заявления ведомств, хроника событий, результаты расследований или ТТХ техники.\n\n"
             "3. 📍 <b>Текущий статус и официальная позиция (2024–2026):</b>\n"
             "   - Актуальное положение дел, последние публичные заявления руководства, ход расследования или текущая диспозиция.\n\n"
-            "4. 📱 <b>Оперативный мониторинг (Telegram и СМИ):</b>\n"
+            "4. 📱 <b>Оперативный мониторинг (Telegram и профильные медиа):</b>\n"
             "   - Если в подключенных Telegram-каналах найдены публикации — приведи конкретные факты и ссылки на посты.\n"
             "   - Если совпадений в каналах нет — напиши строго одну фразу: <i>В недавних публикациях подключенных Telegram-каналов прямых упоминаний за последние дни не зафиксировано.</i> (Категорически запрещено выводить нерелевантные новости других тем!).\n"
-            "   - Что сообщают внешние авторитетные медиа и пресса.\n\n"
-            "5. 🔗 <b>Верифицированные источники:</b>\n"
-            "   - Список источников с активными гиперссылками: <a href=\"URL\">Википедия: Название статьи</a>, <a href=\"URL\">Название СМИ</a>.\n\n"
+            "   - Что сообщают внешние профильные медиа, порталы безопасности или авторы репозиториев строго по теме запроса.\n\n"
+            "5. 🔗 <b>Верифицированные источники и репозитории:</b>\n"
+            "   - Список источников с активными гиперссылками: <a href=\"URL\">Название статьи</a>.\n"
+            "   - Если в контексте найдены репозитории GitHub — обязательно выведи каждый репозиторий: <a href=\"URL\"><b>Владелец/Репозиторий (⭐ Stars)</b></a> с кратким описанием функционала.\n\n"
             "6. 🧅 <b>Теневой сегмент сети Tor (.onion / Darknet):</b>\n"
             "   - Если включен контур Darknet и найдены скрытые ресурсы, выведи их строго в формате: <code>http://адрес.onion</code> с кратким пояснением найденных данных.\n"
             "   - Если прямых утечек не обнаружено, укажи: <i>В проиндексированном теневом сегменте Tor прямых утечек по теме не зафиксировано.</i>\n"
