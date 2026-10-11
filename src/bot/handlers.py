@@ -29,13 +29,15 @@ BOT_COMMANDS = [
     BotCommand(command="chat", description="💬 Войти в диалог с ИИ"),
     BotCommand(command="exit", description="🚪 Выйти из диалога в меню"),
     BotCommand(command="digest", description="⚡️ Сформировать утренний дайджест"),
+    BotCommand(command="search", description="🔍 Основательный поиск (Каналы + Web + Darknet)"),
+    BotCommand(command="darknet", description="🧅 Вкл/выкл поиск в Darknet (.onion)"),
     BotCommand(command="status", description="📊 Статус узлов и моделей"),
     BotCommand(command="sources", description="📋 Управление каналами и RSS"),
     BotCommand(command="add_channel", description="➕ Добавить Telegram-канал"),
     BotCommand(command="add_rss", description="➕ Добавить RSS-ленту"),
     BotCommand(command="del_source", description="🗑 Удалить источник"),
     BotCommand(command="refresh", description="🔄 Собрать свежие новости сейчас"),
-    BotCommand(command="find", description="🔍 Найти пост в каналах по описанию"),
+    BotCommand(command="find", description="🔎 Найти пост в архиве каналов"),
     BotCommand(command="test_mode", description="🧪 Переключить тестовый режим"),
     BotCommand(command="clearnews", description="🧹 Очистить базу новостей и дайджестов"),
     BotCommand(command="help", description="ℹ️ Инструкция и справка по командам"),
@@ -176,7 +178,9 @@ from src.bot.keyboards import (
     get_delete_channels_keyboard,
     get_delete_rss_keyboard,
     get_category_selection_keyboard,
-    get_cancel_keyboard
+    get_cancel_keyboard,
+    get_darknet_keyboard,
+    get_search_result_keyboard
 )
 
 logger = logging.getLogger(__name__)
@@ -346,9 +350,11 @@ def build_snowden_menu_text(
     tz_name: str,
     next_run: str,
     tg_count: int,
-    rss_count: int
+    rss_count: int,
+    darknet_on: bool = False
 ) -> str:
     test_note = " <i>(🧪 тестовый режим)</i>" if is_test_mode else ""
+    darknet_status = "🟢 Включен (/darknet off)" if darknet_on else "⚪️ Выключен (/darknet on)"
     return (
         "🕶 <b>Аналитический агент Сноуден на связи.</b>\n"
         "<i>Фильтрую инфошум, собираю проверенную фактуру со всех каналов и держу руку на пульсе.</i>\n\n"
@@ -358,6 +364,7 @@ def build_snowden_menu_text(
         f"📡 <b>Источники:</b> {tg_count} Telegram-каналов • {rss_count} RSS-потоков{test_note}\n"
         f"⏰ <b>Утренняя сводка:</b> <code>08:50 ({tz_name})</code> • следующая: <code>{next_run}</code>\n"
         f"💬 <b>Диалог в чате:</b> {'🟢 Включен (пиши прямо сюда)' if chat_active else '⚪️ Выключен (вход через /chat)'}\n"
+        f"🧅 <b>Поиск в Darknet (.onion):</b> {darknet_status}\n"
         "━━━━━━━━━━━━━━━━━━━━━\n\n"
         "Выбирай нужный раздел в меню ниже или пользуйся списком команд <b>[/]</b>:"
     )
@@ -405,7 +412,8 @@ def build_snowden_menu_text(
             tz_name=tz_name,
             next_run=next_run,
             tg_count=tg_count,
-            rss_count=rss_count
+            rss_count=rss_count,
+            darknet_on=storage.is_darknet_search_enabled()
         )
         await send_safe_reply(msg, text, reply_markup=get_main_menu_keyboard(chat_active, get_web_app_url()))
 
@@ -417,10 +425,17 @@ def build_snowden_menu_text(
         await register_bot_commands(msg.bot)
         help_text = (
             "📖 <b>Справочник команд терминала «Агент Сноуден»:</b>\n\n"
+            "🔍 <b>Основательный поиск и Darknet:</b>\n"
+            "• <code>/search &lt;запрос&gt;</code> (или <code>/поиск</code>) — глубокий сбор и аналитический отчет ИИ:\n"
+            "  1. Ваши собственные каналы и RSS (с цитатами и ссылками).\n"
+            "  2. Внешние авторитетные мировые и профильные медиа (Web).\n"
+            "  3. Теневой сегмент (.onion / Darknet) — если включен.\n"
+            "• <code>/darknet</code> (или <code>/darknet on|off</code>) — включить/выключить поиск в сети Tor (.onion).\n"
+            "• <code>/find &lt;запрос&gt;</code> — быстрый поиск конкретного поста в архиве каналов.\n\n"
             "💬 <b>Диалог и оперативная разведка:</b>\n"
             "• <code>/chat</code> — войти в режим прямого диалога со Сноуденом.\n"
             "• <code>/exit</code> — завершить диалог и вернуться к терминалу.\n"
-            "• В режиме чата Сноуден опрашивает все каналы (@ross_name, @Dyadyabatya0, @Voennaja_svodka, @infomil_live, РИА, ТАСС), объединяет факты без дублирования в единый насыщенный абзац, цитирует первоисточники через <b>цитаты</b> и отправляет <b>реальные фото/медиа альбомы</b> с места событий!\n\n"
+            "• В режиме чата Сноуден опрашивает все каналы (@medvedev_telegram, @ross_name, @Dyadyabatya0, @Voennaja_svodka, @infomil_live, РИА, ТАСС), объединяет факты без дублирования в единый насыщенный абзац, цитирует первоисточники через <b>цитаты</b> и отправляет <b>реальные фото/медиа альбомы</b> с места событий!\n\n"
             "⚡️ <b>Сводки и аналитика:</b>\n"
             "• <code>/digest</code> — немедленно сгенерировать утреннюю аналитическую сводку (СВО, геополитика, полезный софт, безопасность).\n"
             "• <code>/refresh</code> — запустить оперативный опрос всех каналов и обновить базу публикаций прямо сейчас.\n\n"
@@ -461,7 +476,8 @@ def build_snowden_menu_text(
             tz_name=tz_name,
             next_run=next_run,
             tg_count=tg_count,
-            rss_count=rss_count
+            rss_count=rss_count,
+            darknet_on=storage.is_darknet_search_enabled()
         )
         await safe_edit_text(call, text, get_main_menu_keyboard(chat_active, get_web_app_url()))
 
@@ -729,9 +745,138 @@ def build_snowden_menu_text(
             await wait_msg.edit_text(f"⚠️ Ошибка при сборе публикаций: {e}", parse_mode="HTML")
 
     # --------------------------------------------------------------------------
-    # Поиск постов в каналах по описанию: /find <текст> или /search <текст>
+    # Основательный многоконтурный поиск: /search <текст> или /поиск <текст>
     # --------------------------------------------------------------------------
-    @r.message(Command("find", "search"))
+    @r.message(Command("search", "поиск"))
+    async def cmd_deep_search(msg: Message):
+        user_id = msg.from_user.id
+        if not is_admin(user_id):
+            return
+
+        query = msg.text.partition(" ")[2].strip()
+        is_darknet = storage.is_darknet_search_enabled()
+
+        if not query:
+            dark_status = "🟢 <b>ВКЛЮЧЕН</b>" if is_darknet else "⚪️ <b>ВЫКЛЮЧЕН</b> (включить: <code>/darknet on</code>)"
+            await send_safe_reply(
+                msg,
+                "🔍 <b>Основательный многоконтурный поиск («Агент Сноуден»):</b>\n\n"
+                "Использование:\n"
+                "<code>/search &lt;тема, событие, софт, персона или запрос&gt;</code>\n"
+                "<i>(или на русском: <code>/поиск &lt;запрос&gt;</code>)</i>\n\n"
+                "<b>Сноуден одновременно опрашивает 3 контура разведки:</b>\n"
+                "1. 📱 <b>Ваши источники</b> — Telegram-каналы и RSS из вашей базы (с цитатами и ссылками).\n"
+                "2. 🌐 <b>Внешний Web</b> — мировые СМИ, профильные порталы, аналитика.\n"
+                f"3. 🧅 <b>Теневой сегмент (.onion / Darknet)</b> — статус: {dark_status}\n\n"
+                "После сбора нейросеть сопоставит все факты, выявит расхождения и подготовит структурированный отчет.\n\n"
+                "<b>Примеры:</b>\n"
+                "• <code>/search продвижение в районе Купянска и удары по объектам энергетики</code>\n"
+                "• <code>/search критические уязвимости SSH и эксплойты под Linux</code>\n"
+                "• <code>/search санкции против российского СПГ и танкерного флота</code>",
+                reply_markup=get_darknet_keyboard(is_darknet)
+            )
+            return
+
+        await msg.bot.send_chat_action(msg.chat.id, "typing")
+        darknet_badge = " [🧅 Darknet: ВКЛ]" if is_darknet else ""
+        wait_msg = await msg.answer(
+            f"🔍 <b>Запущен основательный поиск{darknet_badge}...</b>\n"
+            f"<i>Опрашиваю ваши каналы, внешний веб{' и скрытую сеть Tor' if is_darknet else ''}...</i>",
+            parse_mode="HTML"
+        )
+
+        from src.pipeline.deep_search import DeepSearchEngine
+        deep_engine = DeepSearchEngine()
+
+        async def refresh_func():
+            await digest_builder.collect_fresh_news()
+
+        result = await deep_engine.execute_deep_search(
+            query=query,
+            storage=storage,
+            llm_router=llm_router,
+            include_darknet=is_darknet,
+            refresh_collector_func=refresh_func
+        )
+
+        try:
+            await wait_msg.delete()
+        except Exception:
+            pass
+
+        await send_safe_reply(
+            msg,
+            result["text"],
+            reply_markup=get_search_result_keyboard(is_darknet)
+        )
+
+    # --------------------------------------------------------------------------
+    # Управление поиском в Darknet (.onion): /darknet [on/off]
+    # --------------------------------------------------------------------------
+    @r.message(Command("darknet", "onion", "даркнет"))
+    async def cmd_darknet(msg: Message):
+        user_id = msg.from_user.id
+        if not is_admin(user_id):
+            return
+
+        arg = msg.text.partition(" ")[2].strip().lower()
+        if arg in ["on", "1", "enable", "вкл", "true"]:
+            storage.set_darknet_search(True)
+            text = (
+                "🧅 <b>Поиск в Darknet (.onion) ВКЛЮЧЕН.</b>\n\n"
+                "Теперь при выполнении основательного поиска (<code>/search &lt;запрос&gt;</code> или запроса в чате) "
+                "система будет дополнительно опрашивать поисковые индексы теневого сегмента сети Tor (скрытые сервисы .onion, теневые форумы, дампы).\n\n"
+                "<i>💡 Запросы отправляются в безопасном режиме (без исполнения браузерных JS-скриптов).</i>"
+            )
+            await send_safe_reply(msg, text, reply_markup=get_darknet_keyboard(True))
+            return
+        elif arg in ["off", "0", "disable", "выкл", "false"]:
+            storage.set_darknet_search(False)
+            text = (
+                "🧅 <b>Поиск в Darknet (.onion) ВЫКЛЮЧЕН.</b>\n\n"
+                "Теперь поиск проводится только по вашим каналам и внешнему открытому вебу."
+            )
+            await send_safe_reply(msg, text, reply_markup=get_darknet_keyboard(False))
+            return
+
+        current_state = storage.is_darknet_search_enabled()
+        status_label = "🟢 <b>ВКЛЮЧЕН</b>" if current_state else "⚪️ <b>ВЫКЛЮЧЕН</b>"
+        text = (
+            f"🧅 <b>Мониторинг и поиск в теневом сегменте (.onion / Darknet):</b>\n\n"
+            f"Текущий статус: {status_label}\n\n"
+            f"При включении Сноуден опрашивает индексаторы сети Tor на предмет упоминаний, "
+            f"утечек, эксплойтов и публикаций в скрытых сервисах.\n\n"
+            f"• Включить: <code>/darknet on</code>\n"
+            f"• Выключить: <code>/darknet off</code>\n\n"
+            f"Или переключите кнопкой ниже:"
+        )
+        await send_safe_reply(msg, text, reply_markup=get_darknet_keyboard(current_state))
+
+    @r.callback_query(F.data.in_(["btn_darknet_on", "btn_darknet_off"]))
+    async def cb_darknet_toggle(call: CallbackQuery):
+        if not is_admin(call.from_user.id):
+            await call.answer("⛔️ Доступ ограничен", show_alert=True)
+            return
+
+        enable = (call.data == "btn_darknet_on")
+        storage.set_darknet_search(enable)
+        await call.answer(f"Поиск в Darknet: {'ВКЛЮЧЕН' if enable else 'ВЫКЛЮЧЕН'}", show_alert=True)
+
+        status_label = "🟢 <b>ВКЛЮЧЕН</b>" if enable else "⚪️ <b>ВЫКЛЮЧЕН</b>"
+        text = (
+            f"🧅 <b>Мониторинг и поиск в теневом сегменте (.onion / Darknet):</b>\n\n"
+            f"Текущий статус: {status_label}\n\n"
+            f"При включении Сноуден опрашивает индексаторы сети Tor на предмет упоминаний, "
+            f"утечек, эксплойтов и публикаций в скрытых сервисах.\n\n"
+            f"• Включить: <code>/darknet on</code>\n"
+            f"• Выключить: <code>/darknet off</code>"
+        )
+        await safe_edit_text(call, text, get_darknet_keyboard(enable))
+
+    # --------------------------------------------------------------------------
+    # Быстрый поиск постов в архиве каналов: /find <текст>
+    # --------------------------------------------------------------------------
+    @r.message(Command("find"))
     async def cmd_find_post(msg: Message):
         user_id = msg.from_user.id
         if not is_admin(user_id):
@@ -741,13 +886,10 @@ def build_snowden_menu_text(
         if not query:
             await send_safe_reply(
                 msg,
-                "🔍 <b>Поиск по описанию постов в Telegram-каналах:</b>\n\n"
+                "🔎 <b>Быстрый поиск постов в Telegram-каналах:</b>\n\n"
                 "Использование:\n"
                 "<code>/find &lt;описание поста, ключевые слова, тема&gt;</code>\n\n"
-                "Примеры:\n"
-                "• <code>/find подмена видео на лягушку в устройстве Чуйка</code>\n"
-                "• <code>/find атака на нефтеналивной терминал в Ростове</code>\n"
-                "• <code>/find бесплатная замена Adobe Photoshop на GitHub</code>"
+                "<i>Для глубокого многоконтурного поиска (каналы + Web + Darknet) используйте команду <code>/search</code>.</i>"
             )
             return
 
@@ -758,7 +900,7 @@ def build_snowden_menu_text(
         results = await search_engine.search_posts(query, all_candidates, limit=5)
 
         if not results:
-            await send_safe_reply(msg, f"🔍 По запросу <i>«{html.escape(query)}»</i> ничего не найдено в текущей базе постов.")
+            await send_safe_reply(msg, f"🔍 По запросу <i>«{html.escape(query)}»</i> ничего не найдено в текущей базе постов.\nПопробуйте <code>/search {html.escape(query)}</code> для поиска в интернете.")
             return
 
         out_lines = [f"🎯 <b>Найдено в каналах по запросу:</b> <i>«{html.escape(query)}»</i>\n"]
@@ -766,7 +908,6 @@ def build_snowden_menu_text(
             ch = it.get("channel", "Канал")
             pub = (it.get("published_at") or "")[:10]
             url = it.get("url", "")
-            title = it.get("title", "")
             content = (it.get("content", "") or "")[:280].strip()
             out_lines.append(
                 f"<b>{i}. {ch}</b> {f'({pub})' if pub else ''}\n"
@@ -1253,6 +1394,7 @@ def build_snowden_menu_text(
         local_on = await llm_router.check_local_health()
         tz_name = scheduler.timezone_name if scheduler else "Europe/Moscow"
         next_run = scheduler.get_next_run_time() if scheduler else "08:50"
+        darknet_on = storage.is_darknet_search_enabled()
 
         text = (
             f"📊 *Статус узлов системы (2026):*\n\n"
@@ -1267,6 +1409,8 @@ def build_snowden_menu_text(
             f"   - GroqCloud: {'🟢 Подключен' if llm_router.config.groq.api_key else '⚪️ Нет ключа'}\n"
             f"   - Google Gemini: {'🟢 Подключен' if llm_router.config.gemini.api_key else '⚪️ Нет ключа'}\n"
             f"   - OpenRouter (~25 free моделей): {'🟢 Подключен' if llm_router.config.openrouter.api_key else '⚪️ Нет ключа'}\n\n"
+            f"4. 🧅 *Теневой контур (Darknet .onion):*\n"
+            f"   - Поиск по сети Tor: {'🟢 ВКЛЮЧЕН (/darknet off)' if darknet_on else '⚪️ ВЫКЛЮЧЕН (/darknet on)'}\n\n"
             f"Текущий режим: *{llm_router.active_provider.upper()}*"
         )
         if isinstance(event, CallbackQuery):
@@ -1364,6 +1508,39 @@ def build_snowden_menu_text(
                     )
                 await send_safe_reply(msg, "\n".join(out_lines), reply_markup=get_chat_control_keyboard())
                 return
+
+        # Если пользователь просит основательный поиск в сети / даркнете / по источникам:
+        is_deep_search_request = (
+            any(q_lower.startswith(pref) for pref in ["поиск ", "поиск: ", "поищи ", "найди информацию", "найди инфу", "пробей по источникам", "глубокий поиск", "основательный поиск"])
+            or any(kw in q_lower for kw in ["найди в интернете", "найди в вебе", "найди в даркнете", "поищи в onion", "поиск в даркнете", "поиск по onion"])
+        )
+
+        if is_deep_search_request:
+            cleaned_q = re.sub(
+                r'^(?:поиск:?|поищи|найди информацию про|найди информацию о|найди инфу про|найди инфу о|пробей по источникам|глубокий поиск:?|основательный поиск:?)\s*',
+                '',
+                user_query,
+                flags=re.IGNORECASE
+            ).strip()
+            if not cleaned_q:
+                cleaned_q = user_query
+
+            is_darknet = storage.is_darknet_search_enabled()
+            from src.pipeline.deep_search import DeepSearchEngine
+            deep_engine = DeepSearchEngine()
+
+            async def refresh_func():
+                await digest_builder.collect_fresh_news()
+
+            result = await deep_engine.execute_deep_search(
+                query=cleaned_q,
+                storage=storage,
+                llm_router=llm_router,
+                include_darknet=is_darknet,
+                refresh_collector_func=refresh_func
+            )
+            await send_safe_reply(msg, result["text"], reply_markup=get_search_result_keyboard(is_darknet))
+            return
 
         is_news_inquiry = any(w in q_lower for w in [
             "новост", "украин", "сво", "фронт", "трамп", "войн", "политик",

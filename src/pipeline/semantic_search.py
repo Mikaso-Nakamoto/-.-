@@ -70,17 +70,23 @@ class SemanticSearchEngine:
             scored.sort(key=lambda x: x[0], reverse=True)
             return [it for _, it in scored[:limit]]
 
-        # Фоллбэк: семантический поиск по ключевым концептам
+        # Фоллбэк: семантический поиск по стеммам и ключевым концептам
         words = re.findall(r'[а-яa-z0-9_-]+', query.lower())
-        stop_words = {"что", "как", "где", "когда", "найди", "пост", "канале", "видео", "вроде", "помню", "знаю"}
-        keywords = [w for w in words if len(w) > 2 and w not in stop_words]
+        stop_words = {"что", "как", "где", "когда", "найди", "пост", "канале", "видео", "вроде", "помню", "знаю", "про", "для", "или", "это"}
+        stems = []
+        for w in words:
+            if len(w) <= 2 or w in stop_words:
+                continue
+            stem = re.sub(r'(?:овали|евали|ован|еван|али|яли|или|ила|ала|ели|ать|ять|ить|еть|ого|его|ому|ему|ыми|ими|ами|ями|ах|ях|ия|ие|ые|ое|ее|ом|ем|ой|ей|ам|ям|а|я|о|е|у|ю|ы|и)$', '', w)
+            stems.append(stem if len(stem) >= 3 else w)
+        stems = list(dict.fromkeys(stems))
 
         scored = []
         for it in candidates:
             corpus = f"{it.get('channel', '')} {it.get('title', '')} {it.get('content', '')}".lower()
             score = 0
-            for kw in keywords:
-                if kw in corpus:
+            for st in stems:
+                if st in corpus:
                     score += 25
             if score > 0:
                 scored.append((score, it))

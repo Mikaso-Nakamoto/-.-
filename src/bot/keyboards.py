@@ -46,6 +46,27 @@ def get_chat_control_keyboard() -> InlineKeyboardMarkup:
         ]
     ])
 
+def get_darknet_keyboard(is_enabled: bool) -> InlineKeyboardMarkup:
+    toggle_text = "🔴 Отключить поиск в Darknet" if is_enabled else "🟢 Включить поиск в Darknet (.onion)"
+    cb_data = "btn_darknet_off" if is_enabled else "btn_darknet_on"
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=toggle_text, callback_data=cb_data)],
+        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="btn_menu")]
+    ])
+
+def get_search_result_keyboard(is_darknet_enabled: bool) -> InlineKeyboardMarkup:
+    darknet_label = "🧅 Darknet: ВКЛ (отключить)" if is_darknet_enabled else "🧅 Darknet: ВЫКЛ (включить)"
+    cb_data = "btn_darknet_off" if is_darknet_enabled else "btn_darknet_on"
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text=darknet_label, callback_data=cb_data),
+            InlineKeyboardButton(text="💬 Обсудить в чате", callback_data="btn_chat_start")
+        ],
+        [
+            InlineKeyboardButton(text="🏠 Главное меню", callback_data="btn_menu")
+        ]
+    ])
+
 def get_digest_feedback_keyboard(web_app_url: Optional[str] = None, md_file_id: Optional[str] = None) -> InlineKeyboardMarkup:
     rows = [
         [
