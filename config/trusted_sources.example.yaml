@@ -1,0 +1,89 @@
+# ------------------------------------------------------------------------------
+# РЕЕСТР ДОВЕРЕННЫХ ИСТОЧНИКОВ И ТРАСТВИКОВ («АГЕНТ СНОУДЕН»)
+# ------------------------------------------------------------------------------
+# Используется модулем trust_manager.py для верификации ссылок в поиске (Web + Tor Darknet),
+# отсева фишинговых зеркал и маркировки уровня достоверности фактов.
+
+# 1. ТЕНЕВЫЕ РЕЕСТРЫ И ВЕРИФИЦИРОВАННЫЕ КАТАЛОГИ TOR (.ONION)
+darknet_trusted_registries:
+  - name: "OnionTree"
+    domain: "oniontree.org"
+    onion: "http://onions53ehmf4q75.onion"
+    category: "PGP-верифицированный реестр скрытых сервисов"
+    description: "Открытый PGP-подписанный реестр подлинных onion-адресов. Первичный фильтр от фишинга."
+
+  - name: "Daunt (Dread Directory)"
+    domain: "daunt.link"
+    onion: "http://daunt266...onion"
+    category: "Каталог доверенных сервисов Dread"
+    description: "Реестр проверенных форумов и площадок по кибербезопасности."
+
+  - name: "The Hidden Wiki"
+    onion: "http://zqktlwiuavvvqqt4ybvgvi7tyo4hjl5xgfuvpdf6otj5cgwqbym2qad.onion"
+    category: "Классический каталог скрытых сервисов"
+    description: "Архив проверенных ссылок и исследовательских библиотек сети Tor."
+
+  - name: "BreachForums (Официальные зеркала)"
+    onion: "breach"
+    category: "Теневой форум баз данных и утечек"
+    description: "Мониторинг дампов учетных данных и инцидентов безопасности."
+
+  - name: "DuckDuckGo Onion Mirror"
+    onion: "http://duckduckgogg42xjoc72x3sjasowoarfbgcmvfimaftt6twagswzczad.onion"
+    category: "Поисковый шлюз Tor"
+    description: "Официальное защищенное зеркало поисковика DuckDuckGo в сети Tor."
+
+# 2. КИБЕРБЕЗОПАСНОСТЬ, УЯЗВИМОСТИ И ЭКСПЛОЙТЫ
+cybersecurity_and_exploits:
+  - name: "NVD (National Vulnerability Database) & CVE"
+    domain: "nvd.nist.gov"
+    category: "Официальная база уязвимостей CVE"
+    trust: "verified"
+
+  - name: "Exploit-DB"
+    domain: "exploit-db.com"
+    category: "Репозиторий эксплойтов и PoC"
+    trust: "verified"
+
+  - name: "GitHub Security Advisories"
+    domain: "github.com"
+    category: "База уязвимостей Open-Source проектов"
+    trust: "verified"
+
+  - name: "BleepingComputer"
+    domain: "bleepingcomputer.com"
+    category: "Оперативная киберразведка и атаки шифровальщиков"
+    trust: "reputable"
+
+  - name: "Журнал «Хакер»"
+    domain: "xakep.ru"
+    category: "Практическая информационная безопасность и разбор эксплойтов"
+    trust: "reputable"
+
+  - name: "Habr (Информационная безопасность)"
+    domain: "habr.com"
+    category: "Профильное IT-сообщество и реверс-инжиниринг"
+    trust: "reputable"
+
+# 3. ОБЪЕКТИВНЫЙ КОНТРОЛЬ И ФАКТЧЕКИНГ ПО СВО И ГЕОПОЛИТИКЕ
+osint_and_factchecking:
+  - name: "LostArmour"
+    domain: "lostarmour.info"
+    category: "База объективного контроля (фото/видео/геолокация)"
+    trust: "verified"
+    description: "Верификация поражений техники, ударов по объектам строго по фото- и видеодоказательствам."
+
+  - name: "Военная летопись"
+    domain: "voenndelo.com"
+    category: "Военная аналитика и разбор ударов"
+    trust: "reputable"
+
+  - name: "Рыбарь (Хроника и геопривязанные карты)"
+    domain: "rybar.ru"
+    category: "Геолоцированные сводки и тактическая обстановка"
+    trust: "reputable"
+
+  - name: "Warspotting"
+    domain: "warspotting.net"
+    category: "OSINT-база фотофиксации бронетехники"
+    trust: "reputable"

@@ -1,5 +1,6 @@
 import logging
 import math
+import os
 import re
 from typing import List, Dict, Any, Optional
 
@@ -17,8 +18,9 @@ class SemanticSearchEngine:
     1. Векторные эмбеддинги через локальную модель в LM Studio (text-embedding-nomic-embed-text-v1.5).
     2. Плотный семантический поиск по ключевым концептам и синонимам в SQLite.
     """
-    def __init__(self, base_url: str = "http://192.168.1.150:1234/v1", model: str = "text-embedding-nomic-embed-text-v1.5"):
-        self.base_url = base_url.rstrip("/")
+    def __init__(self, base_url: Optional[str] = None, model: str = "text-embedding-nomic-embed-text-v1.5"):
+        resolved_url = base_url or os.getenv("LOCAL_EMBEDDING_URL") or os.getenv("LOCAL_QWEN_URL") or "http://192.168.0.181:1234/v1"
+        self.base_url = resolved_url.rstrip("/")
         self.model = model
 
     async def get_embedding(self, text: str) -> Optional[List[float]]:

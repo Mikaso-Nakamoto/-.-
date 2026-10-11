@@ -10,11 +10,11 @@ llm:
   default_provider: "auto"
   timeout_seconds: 60
 
-  local:
+    local:
     enabled: true
-    # LM Studio по умолчанию слушает порт 1234 (например http://192.168.1.150:1234/v1)
-    base_url: "http://192.168.1.150:1234/v1"
-    model: "qwen2.5-7b-instruct" # или имя модели, загруженной в LM Studio
+    # LM Studio на основном игровом ПК (домашняя подсеть 192.168.0.0/24)
+    base_url: "http://192.168.0.181:1234/v1"
+    model: "qwen2.5-7b-instruct" # текстовая модель Qwen 2.5 7B в LM Studio
     api_key: "lm-studio"
 
   groq:

@@ -12,6 +12,7 @@ from bs4 import BeautifulSoup
 from src.pipeline.semantic_search import SemanticSearchEngine
 from src.llm.router import LLMRouter
 from src.pipeline.storage import Storage
+from src.pipeline.trust_manager import TrustManager
 
 logger = logging.getLogger(__name__)
 
@@ -23,12 +24,16 @@ class DeepSearchEngine:
     1. Контур 1: Собственные подключенные источники пользователя (Telegram-каналы, RSS) с семантическим ранжированием.
     2. Контур 2: Внешние авторитетные мировые и профильные источники (Web-поиск).
     3. Контур 3: Теневой сегмент сети Tor (.onion / Darknet) — опционально, с возможностью включения/выключения.
-    4. Синтез ИИ: сопоставление всех контуров в единый структурированный аналитический отчет.
+    4. Верификация через Траствики (TrustManager): сверка с PGP-реестрами зеркал Tor (OnionTree/Daunt),
+       базами эксплойтов CVE и базами объективного контроля OSINT (LostArmour).
+    5. Синтез ИИ: сопоставление всех контуров в единый структурированный аналитический отчет.
     """
 
-    def __init__(self, semantic_engine: Optional[SemanticSearchEngine] = None):
+    def __init__(self, semantic_engine: Optional[SemanticSearchEngine] = None, trust_manager: Optional[TrustManager] = None):
         self.semantic_engine = semantic_engine or SemanticSearchEngine()
+        self.trust_manager = trust_manager or TrustManager()
         self.tor_socks_proxy = os.getenv("TOR_SOCKS_PROXY", "socks5://127.0.0.1:9050")
+        self.xray_http_proxy = os.getenv("HTTP_PROXY") or os.getenv("WEB_SEARCH_PROXY") or "http://127.0.0.1:10809"
 
     async def search_user_sources(self, query: str, storage: Storage, limit: int = 5) -> List[Dict[str, Any]]:
         """
@@ -78,93 +83,105 @@ class DeepSearchEngine:
         """
         Контур 2: Внешний поиск по открытым авторитетным источникам (Web).
         Опрашивает поисковые шлюзы DuckDuckGo (HTML / Lite) без API-ключей.
+        Использует локальный прокси Xray (127.0.0.1:10809) для надежного обхода блокировок.
         """
         results: List[Dict[str, Any]] = []
-        try:
-            # 1. Пробуем DuckDuckGo HTML интерфейс
-            ddg_url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(query)}"
-            headers = {
-                "User-Agent": USER_AGENT,
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
-            }
-            async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, headers=headers) as client:
-                resp = await client.get(ddg_url)
-                if resp.status_code == 200 and resp.text:
-                    soup = BeautifulSoup(resp.text, "html.parser")
-                    links = soup.find_all("div", class_="result") or soup.find_all("div", class_="web-result")
-                    for el in links[:limit * 2]:
-                        title_tag = el.find("a", class_="result__a") or el.find("a")
-                        if not title_tag:
-                            continue
-                        title = title_tag.get_text(strip=True)
-                        raw_href = title_tag.get("href", "")
-                        clean_url = raw_href
-                        # Раскрываем редирект duckduckgo uddg=
-                        if "uddg=" in raw_href:
-                            m = re.search(r'uddg=([^&]+)', raw_href)
-                            if m:
-                                clean_url = urllib.parse.unquote(m.group(1))
+        headers = {
+            "User-Agent": USER_AGENT,
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+        }
 
-                        snippet_tag = el.find("a", class_="result__snippet") or el.find("div", class_="result__snippet")
-                        snippet = snippet_tag.get_text(strip=True) if snippet_tag else ""
+        # 1. Пробуем DuckDuckGo HTML интерфейс (сначала через Xray-прокси, затем напрямую)
+        ddg_url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(query)}"
+        client_configs = []
+        if self.xray_http_proxy:
+            client_configs.append({"proxy": self.xray_http_proxy, "timeout": timeout})
+        client_configs.append({"timeout": timeout})
 
-                        if clean_url and clean_url.startswith("http") and "duckduckgo.com" not in clean_url:
-                            results.append({
-                                "title": title,
-                                "url": clean_url,
-                                "snippet": snippet,
-                                "source_type": "web"
-                            })
-                            if len(results) >= limit:
-                                break
-        except Exception as e:
-            logger.debug(f"Web search attempt error: {e}")
+        for cfg in client_configs:
+            try:
+                async with httpx.AsyncClient(follow_redirects=True, headers=headers, **cfg) as client:
+                    resp = await client.get(ddg_url)
+                    if resp.status_code == 200 and resp.text:
+                        soup = BeautifulSoup(resp.text, "html.parser")
+                        links = soup.find_all("div", class_="result") or soup.find_all("div", class_="web-result")
+                        for el in links[:limit * 2]:
+                            title_tag = el.find("a", class_="result__a") or el.find("a")
+                            if not title_tag:
+                                continue
+                            title = title_tag.get_text(strip=True)
+                            raw_href = title_tag.get("href", "")
+                            clean_url = raw_href
+                            if "uddg=" in raw_href:
+                                m = re.search(r'uddg=([^&]+)', raw_href)
+                                if m:
+                                    clean_url = urllib.parse.unquote(m.group(1))
+
+                            snippet_tag = el.find("a", class_="result__snippet") or el.find("div", class_="result__snippet")
+                            snippet = snippet_tag.get_text(strip=True) if snippet_tag else ""
+
+                            if clean_url and clean_url.startswith("http") and "duckduckgo.com" not in clean_url:
+                                results.append({
+                                    "title": title,
+                                    "url": clean_url,
+                                    "snippet": snippet,
+                                    "source_type": "web"
+                                })
+                                if len(results) >= limit:
+                                    break
+                if results:
+                    break
+            except Exception as e:
+                logger.debug(f"Web search attempt ({cfg}) error: {e}")
 
         # 2. Если DuckDuckGo HTML не вернул результат, пробуем Lite версию
         if not results:
-            try:
-                lite_url = "https://lite.duckduckgo.com/lite/"
-                headers = {"User-Agent": USER_AGENT}
-                data = {"q": query}
-                async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, headers=headers) as client:
-                    resp = await client.post(lite_url, data=data)
-                    if resp.status_code == 200 and resp.text:
-                        soup = BeautifulSoup(resp.text, "html.parser")
-                        rows = soup.find_all("tr")
-                        for i in range(0, len(rows) - 1, 2):
-                            tr_title = rows[i]
-                            tr_snip = rows[i + 1] if i + 1 < len(rows) else None
-                            a = tr_title.find("a", class_="result-link") or tr_title.find("a")
-                            if a:
-                                title = a.get_text(strip=True)
-                                href = a.get("href", "")
-                                if "uddg=" in href:
-                                    m = re.search(r'uddg=([^&]+)', href)
-                                    if m:
-                                        href = urllib.parse.unquote(m.group(1))
-                                snip = tr_snip.find("td", class_="result-snippet") if tr_snip else None
-                                snippet = snip.get_text(strip=True) if snip else ""
-                                if href.startswith("http"):
-                                    results.append({
-                                        "title": title,
-                                        "url": href,
-                                        "snippet": snippet,
-                                        "source_type": "web"
-                                    })
-                                    if len(results) >= limit:
-                                        break
-            except Exception as e2:
-                logger.debug(f"DuckDuckGo Lite search error: {e2}")
+            lite_url = "https://lite.duckduckgo.com/lite/"
+            data = {"q": query}
+            for cfg in client_configs:
+                try:
+                    async with httpx.AsyncClient(follow_redirects=True, headers=headers, **cfg) as client:
+                        resp = await client.post(lite_url, data=data)
+                        if resp.status_code == 200 and resp.text:
+                            soup = BeautifulSoup(resp.text, "html.parser")
+                            rows = soup.find_all("tr")
+                            for i in range(0, len(rows) - 1, 2):
+                                tr_title = rows[i]
+                                tr_snip = rows[i + 1] if i + 1 < len(rows) else None
+                                a = tr_title.find("a", class_="result-link") or tr_title.find("a")
+                                if a:
+                                    title = a.get_text(strip=True)
+                                    href = a.get("href", "")
+                                    if "uddg=" in href:
+                                        m = re.search(r'uddg=([^&]+)', href)
+                                        if m:
+                                            href = urllib.parse.unquote(m.group(1))
+                                    snip = tr_snip.find("td", class_="result-snippet") if tr_snip else None
+                                    snippet = snip.get_text(strip=True) if snip else ""
+                                    if href.startswith("http"):
+                                        results.append({
+                                            "title": title,
+                                            "url": href,
+                                            "snippet": snippet,
+                                            "source_type": "web"
+                                        })
+                                        if len(results) >= limit:
+                                            break
+                    if results:
+                        break
+                except Exception as e2:
+                    logger.debug(f"DuckDuckGo Lite search attempt ({cfg}) error: {e2}")
 
-        return results
+        # Обогащаем результаты метаданными Траствиков (CVE, Exploit-DB, LostArmour)
+        return self.trust_manager.enrich_items(results)
 
     async def search_darknet(self, query: str, limit: int = 4, timeout: float = 8.0) -> List[Dict[str, Any]]:
         """
         Контур 3: Поиск в скрытом сегменте сети Tor (.onion / Darknet).
         Использует поисковую систему Ahmia (индексатор ресурсов .onion):
         - Сначала пробует через локальный Tor SOCKS5-прокси (socks5://127.0.0.1:9050).
-        - Если Tor-демон не запущен локально, опрашивает безопасный шлюз ahmia.fi (индексирует только .onion).
+        - Если Tor-демон не поднят, опрашивает безопасный шлюз ahmia.fi через Xray-прокси.
         """
         results: List[Dict[str, Any]] = []
 
@@ -181,22 +198,31 @@ class DeepSearchEngine:
             except Exception as e:
                 logger.debug(f"Tor SOCKS5 proxy check/fetch ({self.tor_socks_proxy}): {e}")
 
-        # 2. Если через SOCKS5 не вышло или демон не запущен — опрашиваем индекс Ahmia напрямую (через VPN)
+        # 2. Если через SOCKS5 не вышло — опрашиваем индекс Ahmia через Xray HTTP-прокси (или напрямую)
         if not results and not socks_tried:
-            try:
-                ahmia_url = f"https://ahmia.fi/search/?q={urllib.parse.quote(query)}"
-                headers = {
-                    "User-Agent": USER_AGENT,
-                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                }
-                async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, headers=headers) as client:
-                    resp = await client.get(ahmia_url)
-                    if resp.status_code == 200 and resp.text:
-                        results = self._parse_ahmia_results(resp.text, limit=limit)
-            except Exception as e:
-                logger.debug(f"Direct Ahmia .onion search error: {e}")
+            ahmia_url = f"https://ahmia.fi/search/?q={urllib.parse.quote(query)}"
+            headers = {
+                "User-Agent": USER_AGENT,
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            }
+            client_configs = []
+            if self.xray_http_proxy:
+                client_configs.append({"proxy": self.xray_http_proxy, "timeout": timeout})
+            client_configs.append({"timeout": timeout})
 
-        return results
+            for cfg in client_configs:
+                try:
+                    async with httpx.AsyncClient(follow_redirects=True, headers=headers, **cfg) as client:
+                        resp = await client.get(ahmia_url)
+                        if resp.status_code == 200 and resp.text:
+                            results = self._parse_ahmia_results(resp.text, limit=limit)
+                            if results:
+                                break
+                except Exception as e:
+                    logger.debug(f"Direct Ahmia .onion search error ({cfg}): {e}")
+
+        # Обогащаем результаты проверки по Траствикам (OnionTree, Daunt, The Hidden Wiki)
+        return self.trust_manager.enrich_items(results)
 
     def _parse_ahmia_results(self, html_text: str, limit: int = 4) -> List[Dict[str, Any]]:
         """Парсинг результатов поиска по .onion страницам из разметки Ahmia"""
@@ -303,7 +329,8 @@ class DeepSearchEngine:
         if web_sources:
             lines = []
             for i, it in enumerate(web_sources, 1):
-                lines.append(f"{i}. Заголовок: {it.get('title')}\nВыдержка: {it.get('snippet')}\nСсылка: {it.get('url')}")
+                badge = it.get("trust_badge", "🌐 [Открытый Web]")
+                lines.append(f"{i}. {badge} Заголовок: {it.get('title')}\nВыдержка: {it.get('snippet')}\nСсылка: {it.get('url')}")
             web_sources_text = "\n\n".join(lines)
         else:
             web_sources_text = "Внешний открытый веб-поиск не вернул прямых релевантных страниц."
@@ -313,7 +340,9 @@ class DeepSearchEngine:
             if darknet_sources:
                 lines = []
                 for i, it in enumerate(darknet_sources, 1):
-                    lines.append(f"{i}. Название/Форум: {it.get('title')}\nВыдержка: {it.get('snippet')}\nOnion-адрес: {it.get('url')}")
+                    badge = it.get("trust_badge", "🧅 [Скрытый сервис]")
+                    warn = f"ВНИМАНИЕ: {it.get('trust_warning')}\n" if it.get("trust_warning") else ""
+                    lines.append(f"{i}. {badge} Ресурс: {it.get('title')}\n{warn}Выдержка: {it.get('snippet')}\nOnion-адрес: {it.get('url')}")
                 darknet_sources_text = "\n\n".join(lines)
             else:
                 darknet_sources_text = "В проиндексированном теневом сегменте (.onion / Darknet) прямых упоминаний и активных утечек по теме не обнаружено."
@@ -345,13 +374,15 @@ class DeepSearchEngine:
             "Если в собственных источниках ничего не найдено — прямо и кратко укажи это.\n\n"
             "2. 🌐 <b>По данным внешних авторитетных источников:</b>\n"
             "Что известно из внешнего интернета, мировых СМИ, профильных блогов или официальных сводок. "
-            "Приводи факты с активными ссылками на первоисточники <a href=\"URL\">Источник</a>.\n\n"
+            "Приводи факты с активными ссылками на первоисточники <a href=\"URL\">Источник</a>. "
+            "Если источник верифицирован в Траствике (LostArmour, CVE, Exploit-DB), обязательно подчеркни его надежность.\n\n"
         )
 
         if include_darknet:
             ai_prompt += (
                 "3. 🧅 <b>По данным мониторинга теневого сегмента (.onion):</b>\n"
                 "Что обнаружено в сети Tor (форумы, утечки, теневые посты, зеркала). "
+                "Если ресурс имеет пометку ⚠️ [Неверифицированный Onion] — обязательно предупреди пользователя о риске фишинга/скама. "
                 "Если сигналов нет — честно отметь, что в даркнете следов не зафиксировано.\n\n"
             )
 
@@ -362,6 +393,7 @@ class DeepSearchEngine:
             "ВАЖНО:\n"
             "- Используй ТОЛЬКО разрешенный Telegram HTML (<b>, <i>, <code>, <blockquote>, <a href=\"...\">).\n"
             "- НИКОГДА не используй Markdown (никаких **звездочек** или ```тройных кавычек```).\n"
+            "- Категорически запрещено использовать шаблоны-заглушки вида '— @канал' или '[@канал](ссылка)'.\n"
             "- Ответ должен быть содержательным, плотным и фактологическим, без пустой воды."
         )
 
@@ -425,7 +457,8 @@ class DeepSearchEngine:
                 tit = html.escape(it.get("title", ""))
                 snip = html.escape(it.get("snippet", ""))
                 url = it.get("url", "")
-                lines.append(f"• <a href=\"{url}\"><b>{tit}</b></a>\n<blockquote>{snip}</blockquote>\n")
+                badge = html.escape(it.get("trust_badge", "🌐 [Web]"))
+                lines.append(f"• {badge} <a href=\"{url}\"><b>{tit}</b></a>\n<blockquote>{snip}</blockquote>\n")
         else:
             lines.append("<i>Открытый веб-поиск не вернул прямых релевантных страниц.</i>\n")
 
@@ -437,7 +470,9 @@ class DeepSearchEngine:
                     tit = html.escape(it.get("title", ""))
                     snip = html.escape(it.get("snippet", ""))
                     url = it.get("url", "")
-                    lines.append(f"• <b>{tit}</b>\n<code>{url}</code>\n<blockquote>{snip}</blockquote>\n")
+                    badge = html.escape(it.get("trust_badge", "🧅 [Onion]"))
+                    warn = f"\n⚠️ <i>{html.escape(it.get('trust_warning'))}</i>" if it.get("trust_warning") else ""
+                    lines.append(f"• {badge} <b>{tit}</b>\n<code>{url}</code>{warn}\n<blockquote>{snip}</blockquote>\n")
             else:
                 lines.append("<i>Сигналов и утечек в проиндексированном сегменте Tor не зафиксировано.</i>\n")
 
