@@ -923,7 +923,40 @@ def build_snowden_menu_text(
                 logger.warning(f"Повторный сбор новостей для /find: {e}")
 
         if not results:
-            await send_safe_reply(msg, f"🔍 По запросу <i>«{html.escape(clean_q)}»</i> ничего не найдено в текущей базе постов.\nПопробуйте <code>/search {html.escape(clean_q)}</code> для глубокого поиска в интернете и сети Tor.")
+            # Если в свежем буфере каналов поста нет (например, он вышел несколько дней или недель назад) —
+            # ищем публикацию в поисковом индексе архивов Telegram через DuckDuckGo!
+            await msg.bot.send_chat_action(msg.chat.id, "typing")
+            from src.pipeline.deep_search import DeepSearchEngine
+            deep_engine = DeepSearchEngine()
+
+            web_q = ""
+            if target_channels:
+                ch_filter = " OR ".join([f"site:t.me/{c}" for c in target_channels])
+                web_q = f"({ch_filter}) {clean_q[:140]}"
+            else:
+                web_q = f"site:t.me {clean_q[:140]}"
+
+            web_results = await deep_engine.search_web(web_q, limit=5)
+            if not web_results:
+                # Если строгий фильтр site:t.me вернул пустоту — ищем с ключевым словом telegram
+                web_results = await deep_engine.search_web(f"telegram {clean_q[:140]}", limit=5)
+
+            if web_results:
+                out_lines = [f"🎯 <b>Найдено в архиве Telegram по запросу:</b> <i>«{html.escape(clean_q)}»</i>\n"]
+                for i, it in enumerate(web_results, 1):
+                    tit = it.get("title", "")
+                    url = it.get("url", "")
+                    snip = (it.get("snippet", "") or "")[:280].strip()
+                    badge = it.get("trust_badge", "📱 [Архив Telegram]")
+                    out_lines.append(
+                        f"<b>{i}. {badge} {html.escape(tit)}</b>\n"
+                        f"<blockquote>{html.escape(snip)}...</blockquote>\n"
+                        f"🔗 <a href=\"{url}\">Перейти к публикации</a>\n"
+                    )
+                await send_safe_reply(msg, "\n".join(out_lines))
+                return
+
+            await send_safe_reply(msg, f"🔍 По запросу <i>«{html.escape(clean_q)}»</i> ничего не найдено в архивах каналов.\nПопробуйте <code>/search {html.escape(clean_q)}</code> для глубокого поиска во внешнем Web и сети Tor.")
             return
 
         out_lines = [f"🎯 <b>Найдено в каналах по запросу:</b> <i>«{html.escape(clean_q)}»</i>\n"]
@@ -1596,68 +1629,59 @@ def build_snowden_menu_text(
         # 3. Детальное ранжирование релевантности публикации запросу
         q_stems = extract_stems(user_query)
 
-        def item_score(it):
-            score = 0
-            title_lower = str(it.get('title', '')).lower()
-            content_lower = str(it.get('content', '')).lower()
-            ch_lower = str(it.get('channel', '')).lower()
+        # Отбираем публикации, в которых РЕАЛЬНО встречаются стеммы запроса
+        matching_local_items = []
+        for it in candidate_items:
+            corpus = f"{it.get('title', '')} {it.get('content', '')}".lower()
+            matched = sum(1 for s in q_stems if s in corpus)
+            if matched >= 1:
+                matching_local_items.append((matched, it))
 
-            # Совпадение по корням слов запроса
-            matched = 0
-            for s in q_stems:
-                if s in title_lower:
-                    score += 40
-                    matched += 1
-                elif s in content_lower:
-                    score += 20
-                    matched += 1
+        matching_local_items.sort(key=lambda x: x[0], reverse=True)
+        relevant_local_items = [it for _, it in matching_local_items]
 
-            if matched > 1:
-                score += matched * 25
+        # Если в локальных каналах новостей по запросу мало (< 2) или 0 совпадений:
+        # Автоматически запускаем внешний Web-поиск (Perplexity/OSINT режим)!
+        web_sources_str = ""
+        if len(relevant_local_items) < 2:
+            try:
+                await msg.bot.send_chat_action(msg.chat.id, "typing")
+                from src.pipeline.deep_search import DeepSearchEngine
+                deep_engine = DeepSearchEngine()
+                from src.pipeline.semantic_search import SemanticSearchEngine
+                clean_q, _ = SemanticSearchEngine.extract_search_intent(user_query)
+                web_findings = await deep_engine.search_web(clean_q, limit=5)
+                if web_findings:
+                    w_lines = []
+                    for i, w in enumerate(web_findings, 1):
+                        badge = w.get("trust_badge", "🌐")
+                        w_lines.append(
+                            f"[{i}] {badge} Заголовок: {w.get('title')}\n"
+                            f"Выдержка: {w.get('snippet')}\n"
+                            f"Ссылка: {w.get('url')}"
+                        )
+                    web_sources_str = "\n\n".join(w_lines)
+            except Exception as web_err:
+                logger.warning(f"Chat web search fallback error: {web_err}")
 
-            # Приоритет авторитетных аналитических и профильных каналов
-            if any(ch in ch_lower for ch in ["voennaja_svodka", "infomil_live", "ross_name", "dyadyabatya0"]):
-                score += 20
-            elif any(ch in ch_lower for ch in ["it_shelter", "github_radar", "cyberpolice_rus"]):
-                score += 20
-            elif any(ch in ch_lower for ch in ["rybar", "tsargrad", "rian", "tass"]):
-                score += 15
-
-            # Наличие медиа/фотографий
-            if it.get("media_urls") or it.get("image_url"):
-                score += 10
-
-            return score
-
-        sorted_items = sorted(candidate_items, key=item_score, reverse=True)
-
-        # 4. Извлечение реальных фотографий: отбираем фото, строго соответствующие теме запроса
-        is_combat_inquiry = any(w in q_lower for w in ["фронт", "сво", "удар", "дрон", "бпла", "прилет", "атак", "обстрел", "бой"])
+        # 4. Извлечение реальных фотографий: фото прикрепляем ТОЛЬКО если есть реальные тематические посты
         relevant_photos = []
-
-        photo_candidates = []
-        for it in sorted_items:
-            tit_low = str(it.get("title", "")).lower()
-            if is_combat_inquiry:
-                # Исключаем фото чисто политических речей/пресс-конференций, если вопрос о боевых действиях
-                if any(k in tit_low for k in ["трамп", "байден", "конгресс", "белый дом"]) and not any(k in tit_low for k in ["удар", "дрон", "фронт", "ростов"]):
-                    continue
-            photo_candidates.append(it)
-
-        top_candidates = photo_candidates[:4] if photo_candidates else sorted_items[:3]
-        for it in top_candidates:
-            for img in it.get("media_urls", []):
-                if img and img.startswith("http") and img not in relevant_photos:
-                    relevant_photos.append(img)
-            img0 = it.get("image_url")
-            if img0 and img0.startswith("http") and img0 not in relevant_photos:
-                relevant_photos.append(img0)
+        if relevant_local_items:
+            top_candidates = relevant_local_items[:4]
+            for it in top_candidates:
+                for img in it.get("media_urls", []):
+                    if img and img.startswith("http") and img not in relevant_photos:
+                        relevant_photos.append(img)
+                img0 = it.get("image_url")
+                if img0 and img0.startswith("http") and img0 not in relevant_photos:
+                    relevant_photos.append(img0)
 
         # 5. Формирование максимально полного пакета фактов для LLM
         recent_news_str = ""
-        if sorted_items:
+        news_items_to_send = relevant_local_items if relevant_local_items else candidate_items[:15]
+        if news_items_to_send and (relevant_local_items or not web_sources_str):
             news_parts = []
-            for i, it in enumerate(sorted_items[:28], 1):
+            for i, it in enumerate(news_items_to_send[:25], 1):
                 ch = it.get("channel", "Канал")
                 cat = it.get("category", "Новости")
                 t = it.get("title", "")
@@ -1679,7 +1703,8 @@ def build_snowden_menu_text(
                 user_prompt=user_query,
                 chat_history=history,
                 latest_digest=latest_digest,
-                recent_news=recent_news_str
+                recent_news=recent_news_str,
+                web_sources=web_sources_str
             )
 
             if not res.get("success"):

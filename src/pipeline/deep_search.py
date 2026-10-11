@@ -229,23 +229,74 @@ class DeepSearchEngine:
 
         return list(dict.fromkeys([t for t in terms if t.strip()]))[:3]
 
+    async def _search_duckduckgo_onion(self, term: str, limit: int = 4, timeout: float = 8.0) -> List[Dict[str, Any]]:
+        """Поиск ресурсов теневого сегмента .onion через поисковый индекс DuckDuckGo"""
+        results = []
+        queries_to_try = [f"{term} site:onion", f"\"{term}\" .onion", f"{term} .onion"]
+        headers = {
+            "User-Agent": USER_AGENT,
+            "Accept-Language": "ru,en;q=0.9",
+        }
+        client_configs = []
+        if self.xray_http_proxy:
+            client_configs.append({"proxy": self.xray_http_proxy, "timeout": timeout})
+        client_configs.append({"timeout": timeout})
+
+        for q in queries_to_try:
+            url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(q)}"
+            for cfg in client_configs:
+                try:
+                    async with httpx.AsyncClient(follow_redirects=True, headers=headers, **cfg) as client:
+                        resp = await client.get(url)
+                        if resp.status_code == 200 and resp.text:
+                            soup = BeautifulSoup(resp.text, "html.parser")
+                            for el in soup.find_all("div", class_="result"):
+                                a = el.find("a", class_="result__a") or el.find("a")
+                                snip = el.find("a", class_="result__snippet") or el.find("div", class_="result__snippet")
+                                if a:
+                                    href = a.get("href", "")
+                                    if "uddg=" in href:
+                                        m = re.search(r'uddg=([^&]+)', href)
+                                        if m:
+                                            href = urllib.parse.unquote(m.group(1))
+                                    title = a.get_text(strip=True)
+                                    snippet = snip.get_text(strip=True) if snip else ""
+                                    if ".onion" in href or ".onion" in snippet or ".onion" in title:
+                                        results.append({
+                                            "title": title,
+                                            "url": href,
+                                            "snippet": snippet,
+                                            "source_type": "darknet_onion"
+                                        })
+                                        if len(results) >= limit:
+                                            break
+                    if results:
+                        break
+                except Exception as e:
+                    logger.debug(f"DuckDuckGo onion search ({cfg}) error: {e}")
+            if results:
+                break
+        return results
+
     async def search_darknet(self, query: str, limit: int = 4, timeout: float = 8.0) -> List[Dict[str, Any]]:
         """
         Контур 3: Поиск в скрытом сегменте сети Tor (.onion / Darknet).
         Использует поисковую систему Ahmia (индексатор ресурсов .onion):
-        - Сначала пробует через локальный Tor SOCKS5-прокси (socks5://127.0.0.1:9050).
-        - Если Tor-демон не поднят, опрашивает безопасный шлюз ahmia.fi через Xray-прокси.
+        - Сначала пробует через локальный Tor SOCKS5-прокси нативный .onion адрес Ahmia без Cloudflare.
+        - Затем опрашивает безопасный шлюз ahmia.fi через Xray HTTP-прокси.
+        - При блокировках или нуле находок опрашивает .onion индекс DuckDuckGo.
         - Использует умную трансляцию запросов на английский для англоязычного сегмента Tor.
         """
         results: List[Dict[str, Any]] = []
         search_terms = self.generate_darknet_search_terms(query)
 
         for term in search_terms:
-            # 1. Попытка через Tor SOCKS5 прокси
+            # 1. Попытка через Tor SOCKS5 прокси к официальному скрытому сервису Ahmia .onion
             if self.tor_socks_proxy:
                 try:
-                    onion_search_url = f"https://ahmia.fi/search/?q={urllib.parse.quote(term)}"
-                    async with httpx.AsyncClient(proxy=self.tor_socks_proxy, timeout=2.5, headers={"User-Agent": USER_AGENT}) as client:
+                    # Официальный скрытый сервис Ahmia внутри Tor (без Cloudflare)
+                    onion_search_url = f"http://juhanurmih5wuwwkgfte6nxha5f47vvai7bop5nm3uzrny3wfoisgd.onion/search/?q={urllib.parse.quote(term)}"
+                    async with httpx.AsyncClient(proxy=self.tor_socks_proxy, timeout=5.0, headers={"User-Agent": USER_AGENT}) as client:
                         resp = await client.get(onion_search_url)
                         if resp.status_code == 200 and resp.text:
                             parsed = self._parse_ahmia_results(resp.text, limit=limit)
@@ -253,9 +304,9 @@ class DeepSearchEngine:
                                 results.extend(parsed)
                                 break
                 except Exception as e:
-                    logger.debug(f"Tor SOCKS5 proxy check/fetch ({term}): {e}")
+                    logger.debug(f"Tor SOCKS5 onion Ahmia fetch error ({term}): {e}")
 
-            # 2. Если через SOCKS5 не вышло или 0 находок — опрашиваем индекс Ahmia через Xray HTTP-прокси
+            # 2. Если через Tor .onion не вышло или 0 находок — опрашиваем клирнет-индекс Ahmia через Xray HTTP-прокси
             if not results:
                 ahmia_url = f"https://ahmia.fi/search/?q={urllib.parse.quote(term)}"
                 headers = {
@@ -280,6 +331,16 @@ class DeepSearchEngine:
                         logger.debug(f"Direct Ahmia .onion search error ({cfg}): {e}")
                 if results:
                     break
+
+            # 3. Гарантированный фоллбэк: поиск .onion страниц через DuckDuckGo индекс
+            if not results:
+                try:
+                    ddg_onion = await self._search_duckduckgo_onion(term, limit=limit, timeout=timeout)
+                    if ddg_onion:
+                        results.extend(ddg_onion)
+                        break
+                except Exception as ddg_err:
+                    logger.debug(f"DDG onion fallback error: {ddg_err}")
 
         # Дедупликация по url
         seen = set()

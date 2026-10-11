@@ -119,12 +119,10 @@ class SemanticSearchEngine:
                 it_emb = await self.get_embedding(text_sample)
                 if it_emb:
                     sim = self.cosine_similarity(query_emb, it_emb)
-                    if is_target_ch:
-                        sim += 0.15
-                    threshold = 0.30 if is_target_ch else 0.40
-                    # Порог релевантности: отсекаем несвязанный оффтоп
-                    if sim >= threshold:
-                        scored.append((sim, it))
+                    # Базовая релевантность обязана быть не ниже 0.35!
+                    if sim >= 0.35:
+                        final_sim = sim + (0.15 if is_target_ch else 0.0)
+                        scored.append((final_sim, it))
             scored.sort(key=lambda x: x[0], reverse=True)
             return [it for _, it in scored[:limit]]
 
@@ -144,13 +142,21 @@ class SemanticSearchEngine:
             ch_name = (it.get('channel') or '').lower().lstrip('@')
             is_target_ch = any(t in ch_name for t in norm_targets) if norm_targets else False
             corpus = f"{it.get('channel', '')} {it.get('title', '')} {it.get('content', '')}".lower()
-            score = 50 if is_target_ch else 0
+            
+            # Считаем реальные совпадения по стеммам запроса в тексте поста
+            matched_stems = 0
             for st in stems:
                 if st in corpus:
-                    score += 25
-            # Требуем хотя бы 2 совпадения по стеммам или совпадение целевого канала со стеммой
-            if score >= 50 or (len(stems) == 1 and score >= 25):
-                scored.append((score, it))
+                    matched_stems += 1
+
+            # КРИТИЧНО: пост ОБЯЗАН иметь совпадение по теме запроса (хотя бы 1 совпадение по ключевому слову)!
+            # Принадлежность к каналу даёт бонус, но НЕ даёт права пропускать оффтоп!
+            if matched_stems >= 1:
+                score = matched_stems * 25
+                if is_target_ch:
+                    score += 40
+                if (matched_stems >= 2) or (is_target_ch and matched_stems >= 1) or (len(stems) <= 2 and matched_stems >= 1):
+                    scored.append((score, it))
 
         scored.sort(key=lambda x: x[0], reverse=True)
         return [it for _, it in scored[:limit]]
