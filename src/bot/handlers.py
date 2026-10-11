@@ -30,6 +30,7 @@ BOT_COMMANDS = [
     BotCommand(command="exit", description="🚪 Выйти из диалога в меню"),
     BotCommand(command="digest", description="⚡️ Сформировать утренний дайджест"),
     BotCommand(command="search", description="🔍 Основательный поиск (Каналы + Web + Darknet)"),
+    BotCommand(command="google", description="🌐 Вкл/выкл Google AI Search (Grounding)"),
     BotCommand(command="darknet", description="🧅 Вкл/выкл поиск в Darknet (.onion)"),
     BotCommand(command="status", description="📊 Статус узлов и моделей"),
     BotCommand(command="sources", description="📋 Управление каналами и RSS"),
@@ -180,6 +181,7 @@ from src.bot.keyboards import (
     get_category_selection_keyboard,
     get_cancel_keyboard,
     get_darknet_keyboard,
+    get_search_settings_keyboard,
     get_search_result_keyboard
 )
 
@@ -415,11 +417,12 @@ def build_snowden_menu_text(
         await register_bot_commands(msg.bot)
         help_text = (
             "📖 <b>Справочник команд терминала «Агент Сноуден»:</b>\n\n"
-            "🔍 <b>Основательный поиск и Darknet:</b>\n"
+            "🔍 <b>Основательный поиск, Google AI и Darknet:</b>\n"
             "• <code>/search &lt;запрос&gt;</code> (или <code>/поиск</code>) — глубокий сбор и аналитический отчет ИИ:\n"
             "  1. Ваши собственные каналы и RSS (с цитатами и ссылками).\n"
-            "  2. Внешние авторитетные мировые и профильные медиа (Web).\n"
+            "  2. Внешние авторитетные мировые и профильные медиа (Web / Google AI Grounding).\n"
             "  3. Теневой сегмент (.onion / Darknet) — если включен.\n"
+            "• <code>/google</code> (или <code>/google on|off</code>) — включить/выключить живой Google AI Search (Gemini Grounding).\n"
             "• <code>/darknet</code> (или <code>/darknet on|off</code>) — включить/выключить поиск в сети Tor (.onion).\n"
             "• <code>/find &lt;запрос&gt;</code> — быстрый поиск конкретного поста в архиве каналов.\n\n"
             "💬 <b>Диалог и оперативная разведка:</b>\n"
@@ -745,9 +748,11 @@ def build_snowden_menu_text(
 
         query = msg.text.partition(" ")[2].strip()
         is_darknet = storage.is_darknet_search_enabled()
+        is_google = storage.is_google_ai_search_enabled()
 
         if not query:
-            dark_status = "🟢 <b>ВКЛЮЧЕН</b>" if is_darknet else "⚪️ <b>ВЫКЛЮЧЕН</b> (включить: <code>/darknet on</code>)"
+            google_status = "🟢 <b>ВКЛЮЧЕН (Gemini Grounding)</b>" if is_google else "⚪️ <b>ВЫКЛЮЧЕН (DuckDuckGo)</b> (вкл: <code>/google on</code>)"
+            dark_status = "🟢 <b>ВКЛЮЧЕН</b>" if is_darknet else "⚪️ <b>ВЫКЛЮЧЕН</b> (вкл: <code>/darknet on</code>)"
             await send_safe_reply(
                 msg,
                 "🔍 <b>Основательный многоконтурный поиск («Агент Сноуден»):</b>\n\n"
@@ -756,22 +761,28 @@ def build_snowden_menu_text(
                 "<i>(или на русском: <code>/поиск &lt;запрос&gt;</code>)</i>\n\n"
                 "<b>Сноуден одновременно опрашивает 3 контура разведки:</b>\n"
                 "1. 📱 <b>Ваши источники</b> — Telegram-каналы и RSS из вашей базы (с цитатами и ссылками).\n"
-                "2. 🌐 <b>Внешний Web</b> — мировые СМИ, профильные порталы, аналитика.\n"
-                f"3. 🧅 <b>Теневой сегмент (.onion / Darknet)</b> — статус: {dark_status}\n\n"
+                f"2. 🌐 <b>Внешний Web</b> — мировые СМИ, профильные порталы (Google AI: {google_status}).\n"
+                f"3. 🧅 <b>Теневой сегмент (.onion / Darknet)</b> — Tor: {dark_status}\n\n"
                 "После сбора нейросеть сопоставит все факты, выявит расхождения и подготовит структурированный отчет.\n\n"
                 "<b>Примеры:</b>\n"
+                "• <code>/search Герань-5 характеристики и боевое применение</code>\n"
                 "• <code>/search продвижение в районе Купянска и удары по объектам энергетики</code>\n"
-                "• <code>/search критические уязвимости SSH и эксплойты под Linux</code>\n"
-                "• <code>/search санкции против российского СПГ и танкерного флота</code>",
-                reply_markup=get_darknet_keyboard(is_darknet)
+                "• <code>/search критические уязвимости SSH и эксплойты под Linux</code>",
+                reply_markup=get_search_settings_keyboard(is_darknet, is_google)
             )
             return
 
         await msg.bot.send_chat_action(msg.chat.id, "typing")
-        darknet_badge = " [🧅 Darknet: ВКЛ]" if is_darknet else ""
+        badges = []
+        if is_google:
+            badges.append("🌐 Google AI")
+        if is_darknet:
+            badges.append("🧅 Darknet")
+        badges_str = f" [{', '.join(badges)}]" if badges else ""
+
         wait_msg = await msg.answer(
-            f"🔍 <b>Запущен основательный поиск{darknet_badge}...</b>\n"
-            f"<i>Опрашиваю ваши каналы, внешний веб{' и скрытую сеть Tor' if is_darknet else ''}...</i>",
+            f"🔍 <b>Запущен основательный поиск{badges_str}...</b>\n"
+            f"<i>Опрашиваю ваши каналы, внешний веб{' через Google Grounding' if is_google else ''}{' и скрытую сеть Tor' if is_darknet else ''}...</i>",
             parse_mode="HTML"
         )
 
@@ -797,8 +808,75 @@ def build_snowden_menu_text(
         await send_safe_reply(
             msg,
             result["text"],
-            reply_markup=get_search_result_keyboard(is_darknet)
+            reply_markup=get_search_result_keyboard(is_darknet, is_google)
         )
+
+    # --------------------------------------------------------------------------
+    # Управление Google AI Search (Gemini Grounding): /google [on/off]
+    # --------------------------------------------------------------------------
+    @r.message(Command("google", "гугл"))
+    async def cmd_google(msg: Message):
+        user_id = msg.from_user.id
+        if not is_admin(user_id):
+            return
+
+        arg = msg.text.partition(" ")[2].strip().lower()
+        is_darknet = storage.is_darknet_search_enabled()
+        if arg in ["on", "1", "enable", "вкл", "true"]:
+            storage.set_google_ai_search(True)
+            text = (
+                "🌐 <b>Google AI Search (Gemini Grounding) ВКЛЮЧЕН.</b>\n\n"
+                "Теперь при основательном поиске (<code>/search &lt;запрос&gt;</code> или запросах в чате) "
+                "система использует живой поисковый индекс Google через Gemini Search Grounding. "
+                "Это обеспечивает мгновенное нахождение свежих модификаций техники (например, «Герань-5»), "
+                "актуальных фронтовых сводок, уязвимостей и официальных источников с автоматическим извлечением прямых ссылок.\n\n"
+                "<i>💡 В случае недоступности API-ключа Gemini система автоматически использует резервный веб-шлюз.</i>"
+            )
+            await send_safe_reply(msg, text, reply_markup=get_search_settings_keyboard(is_darknet, True))
+            return
+        elif arg in ["off", "0", "disable", "выкл", "false"]:
+            storage.set_google_ai_search(False)
+            text = (
+                "🌐 <b>Google AI Search (Gemini Grounding) ВЫКЛЮЧЕН.</b>\n\n"
+                "Внешний веб-поиск переведен в стандартный режим (DuckDuckGo)."
+            )
+            await send_safe_reply(msg, text, reply_markup=get_search_settings_keyboard(is_darknet, False))
+            return
+
+        current_state = storage.is_google_ai_search_enabled()
+        status_label = "🟢 <b>ВКЛЮЧЕН (Gemini Grounding)</b>" if current_state else "⚪️ <b>ВЫКЛЮЧЕН (DuckDuckGo)</b>"
+        text = (
+            f"🌐 <b>Режим внешнего веб-поиска (Google AI Grounding):</b>\n\n"
+            f"Текущий статус: {status_label}\n\n"
+            f"При включении Сноуден задействует прямой поиск Google через Gemini AI Grounding, "
+            f"обеспечивая поиск новейших модификаций (например, «Герань-5», редкие типы БПЛА и РЭБ, свежие патчи ПО) "
+            f"с валидацией ссылок через реестр доверенных источников.\n\n"
+            f"• Включить: <code>/google on</code>\n"
+            f"• Выключить: <code>/google off</code>\n\n"
+            f"Или переключите кнопкой ниже:"
+        )
+        await send_safe_reply(msg, text, reply_markup=get_search_settings_keyboard(is_darknet, current_state))
+
+    @r.callback_query(F.data.in_(["btn_google_on", "btn_google_off"]))
+    async def cb_google_toggle(call: CallbackQuery):
+        if not is_admin(call.from_user.id):
+            await call.answer("⛔️ Доступ ограничен", show_alert=True)
+            return
+
+        enable = (call.data == "btn_google_on")
+        storage.set_google_ai_search(enable)
+        await call.answer(f"Google AI Search: {'ВКЛЮЧЕН' if enable else 'ВЫКЛЮЧЕН'}", show_alert=True)
+
+        is_darknet = storage.is_darknet_search_enabled()
+        status_label = "🟢 <b>ВКЛЮЧЕН</b>" if enable else "⚪️ <b>ВЫКЛЮЧЕН</b>"
+        text = (
+            f"🌐 <b>Режим внешнего веб-поиска (Google AI Grounding):</b>\n\n"
+            f"Текущий статус: {status_label}\n\n"
+            f"При включении Сноуден опрашивает живой Google Search через Gemini Grounding с разметкой источников.\n\n"
+            f"• Включить: <code>/google on</code>\n"
+            f"• Выключить: <code>/google off</code>"
+        )
+        await safe_edit_text(call, text, get_search_settings_keyboard(is_darknet, enable))
 
     # --------------------------------------------------------------------------
     # Управление поиском в Darknet (.onion): /darknet [on/off]
@@ -810,6 +888,7 @@ def build_snowden_menu_text(
             return
 
         arg = msg.text.partition(" ")[2].strip().lower()
+        is_google = storage.is_google_ai_search_enabled()
         if arg in ["on", "1", "enable", "вкл", "true"]:
             storage.set_darknet_search(True)
             text = (
@@ -818,7 +897,7 @@ def build_snowden_menu_text(
                 "система будет дополнительно опрашивать поисковые индексы теневого сегмента сети Tor (скрытые сервисы .onion, теневые форумы, дампы).\n\n"
                 "<i>💡 Запросы отправляются в безопасном режиме (без исполнения браузерных JS-скриптов).</i>"
             )
-            await send_safe_reply(msg, text, reply_markup=get_darknet_keyboard(True))
+            await send_safe_reply(msg, text, reply_markup=get_search_settings_keyboard(True, is_google))
             return
         elif arg in ["off", "0", "disable", "выкл", "false"]:
             storage.set_darknet_search(False)
@@ -826,7 +905,7 @@ def build_snowden_menu_text(
                 "🧅 <b>Поиск в Darknet (.onion) ВЫКЛЮЧЕН.</b>\n\n"
                 "Теперь поиск проводится только по вашим каналам и внешнему открытому вебу."
             )
-            await send_safe_reply(msg, text, reply_markup=get_darknet_keyboard(False))
+            await send_safe_reply(msg, text, reply_markup=get_search_settings_keyboard(False, is_google))
             return
 
         current_state = storage.is_darknet_search_enabled()
@@ -840,7 +919,7 @@ def build_snowden_menu_text(
             f"• Выключить: <code>/darknet off</code>\n\n"
             f"Или переключите кнопкой ниже:"
         )
-        await send_safe_reply(msg, text, reply_markup=get_darknet_keyboard(current_state))
+        await send_safe_reply(msg, text, reply_markup=get_search_settings_keyboard(current_state, is_google))
 
     @r.callback_query(F.data.in_(["btn_darknet_on", "btn_darknet_off"]))
     async def cb_darknet_toggle(call: CallbackQuery):
@@ -852,6 +931,7 @@ def build_snowden_menu_text(
         storage.set_darknet_search(enable)
         await call.answer(f"Поиск в Darknet: {'ВКЛЮЧЕН' if enable else 'ВЫКЛЮЧЕН'}", show_alert=True)
 
+        is_google = storage.is_google_ai_search_enabled()
         status_label = "🟢 <b>ВКЛЮЧЕН</b>" if enable else "⚪️ <b>ВЫКЛЮЧЕН</b>"
         text = (
             f"🧅 <b>Мониторинг и поиск в теневом сегменте (.onion / Darknet):</b>\n\n"
@@ -861,23 +941,25 @@ def build_snowden_menu_text(
             f"• Включить: <code>/darknet on</code>\n"
             f"• Выключить: <code>/darknet off</code>"
         )
-        await safe_edit_text(call, text, get_darknet_keyboard(enable))
+        await safe_edit_text(call, text, get_search_settings_keyboard(enable, is_google))
 
     @r.callback_query(F.data == "btn_search_menu")
     async def cb_search_menu(call: CallbackQuery):
         is_darknet = storage.is_darknet_search_enabled()
+        is_google = storage.is_google_ai_search_enabled()
         dark_status = "🟢 <b>ВКЛЮЧЕН</b>" if is_darknet else "⚪️ <b>ВЫКЛЮЧЕН</b>"
+        google_status = "🟢 <b>ВКЛЮЧЕН</b>" if is_google else "⚪️ <b>ВЫКЛЮЧЕН</b>"
         text = (
             "🔍 <b>Центр поиска и OSINT-разведки («Агент Сноуден»):</b>\n\n"
             "<b>Сноуден одновременно опрашивает 3 контура:</b>\n"
             "1. 📱 <b>Ваши источники</b> — подключенные Telegram-каналы и RSS.\n"
-            "2. 🌐 <b>Внешний Web</b> — мировые СМИ, профильные порталы, базы эксплойтов.\n"
+            f"2. 🌐 <b>Внешний Web</b> (Google AI Grounding: {google_status}) — мировые СМИ, профильные порталы, базы эксплойтов.\n"
             f"3. 🧅 <b>Теневой сегмент (.onion / Darknet)</b> — {dark_status}\n\n"
             "<b>Как пользоваться:</b>\n"
             "• Просто напишите в чат любой вопрос или тему (ИИ сам выполнит поиск и подготовит отчет).\n"
             "• Либо используйте команды <code>/search &lt;тема&gt;</code> или <code>/find &lt;пост&gt;</code>."
         )
-        await safe_edit_text(call, text, get_darknet_keyboard(is_darknet))
+        await safe_edit_text(call, text, get_search_settings_keyboard(is_darknet, is_google))
 
     # --------------------------------------------------------------------------
     # Быстрый поиск постов в архиве каналов: /find <текст>
@@ -1457,6 +1539,7 @@ def build_snowden_menu_text(
         tz_name = scheduler.timezone_name if scheduler else "Europe/Moscow"
         next_run = scheduler.get_next_run_time() if scheduler else "08:50"
         darknet_on = storage.is_darknet_search_enabled()
+        google_ai_on = storage.is_google_ai_search_enabled()
 
         text = (
             f"📊 *Статус узлов системы (2026):*\n\n"
@@ -1471,8 +1554,9 @@ def build_snowden_menu_text(
             f"   - GroqCloud: {'🟢 Подключен' if llm_router.config.groq.api_key else '⚪️ Нет ключа'}\n"
             f"   - Google Gemini: {'🟢 Подключен' if llm_router.config.gemini.api_key else '⚪️ Нет ключа'}\n"
             f"   - OpenRouter (~25 free моделей): {'🟢 Подключен' if llm_router.config.openrouter.api_key else '⚪️ Нет ключа'}\n\n"
-            f"4. 🧅 *Теневой контур (Darknet .onion):*\n"
-            f"   - Поиск по сети Tor: {'🟢 ВКЛЮЧЕН (/darknet off)' if darknet_on else '⚪️ ВЫКЛЮЧЕН (/darknet on)'}\n\n"
+            f"4. 🌐 *Контуры поиска и разведки:*\n"
+            f"   - Google AI Search (Grounding): {'🟢 ВКЛЮЧЕН (/google off)' if google_ai_on else '⚪️ ВЫКЛЮЧЕН (/google on)'}\n"
+            f"   - Сеть Tor (Darknet .onion): {'🟢 ВКЛЮЧЕН (/darknet off)' if darknet_on else '⚪️ ВЫКЛЮЧЕН (/darknet on)'}\n\n"
             f"Текущий режим: *{llm_router.active_provider.upper()}*"
         )
         if isinstance(event, CallbackQuery):
@@ -1609,6 +1693,7 @@ def build_snowden_menu_text(
         # 2. ДЕЙСТВИЕ: deep_search (глубокий поиск фактов, внешний веб, OSINT, утечки, Tor)
         if action == "deep_search":
             is_darknet = include_darknet or storage.is_darknet_search_enabled()
+            is_google = storage.is_google_ai_search_enabled()
             from src.pipeline.deep_search import DeepSearchEngine
             deep_engine = DeepSearchEngine()
 
@@ -1622,7 +1707,7 @@ def build_snowden_menu_text(
                 include_darknet=is_darknet,
                 refresh_collector_func=refresh_func
             )
-            await send_safe_reply(msg, result["text"], reply_markup=get_search_result_keyboard(is_darknet))
+            await send_safe_reply(msg, result["text"], reply_markup=get_search_result_keyboard(is_darknet, is_google))
             return
 
         # 3. ДЕЙСТВИЕ: digest (генерация сводки новостей по запросу)

@@ -13,6 +13,8 @@ from src.pipeline.semantic_search import SemanticSearchEngine
 from src.llm.router import LLMRouter
 from src.pipeline.storage import Storage
 from src.pipeline.trust_manager import TrustManager
+from src.pipeline.google_grounding import GoogleSearchGroundingEngine
+from src.pipeline.query_decomposer import QueryDecomposer
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +24,7 @@ class DeepSearchEngine:
     """
     Движок многоконтурного глубокого поиска («Агент Сноуден»):
     1. Контур 1: Собственные подключенные источники пользователя (Telegram-каналы, RSS) с семантическим ранжированием.
-    2. Контур 2: Внешние авторитетные мировые и профильные источники (Web-поиск).
+    2. Контур 2: Внешние авторитетные мировые и профильные источники (Web-поиск, Google Режим ИИ).
     3. Контур 3: Теневой сегмент сети Tor (.onion / Darknet) — опционально, с возможностью включения/выключения.
     4. Верификация через Траствики (TrustManager): сверка с PGP-реестрами зеркал Tor (OnionTree/Daunt),
        базами эксплойтов CVE и базами объективного контроля OSINT (LostArmour).
@@ -34,11 +36,13 @@ class DeepSearchEngine:
         self.trust_manager = trust_manager or TrustManager()
         self.tor_socks_proxy = os.getenv("TOR_SOCKS_PROXY", "socks5://127.0.0.1:9050")
         self.xray_http_proxy = os.getenv("HTTP_PROXY") or os.getenv("WEB_SEARCH_PROXY") or "http://127.0.0.1:10809"
+        self.google_grounding = GoogleSearchGroundingEngine(proxy=self.xray_http_proxy)
+        self.decomposer = QueryDecomposer()
 
-    async def search_user_sources(self, query: str, storage: Storage, limit: int = 5, target_channels: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+    async def search_user_sources(self, query: str, storage: Storage, limit: int = 5, target_channels: Optional[List[str]] = None, specific_entities: Optional[List[str]] = None) -> List[Dict[str, Any]]:
         """
         Контур 1: Поиск по базе собственных каналов и лент пользователя.
-        Использует семантический векторизованный поиск + полнотекстовое совпадение.
+        Использует семантический векторизованный поиск + полнотекстовое совпадение + декомпозицию сущностей.
         """
         try:
             clean_q, auto_targets = self.semantic_engine.extract_search_intent(query)
@@ -56,6 +60,17 @@ class DeepSearchEngine:
                 if key and key not in seen:
                     seen.add(key)
                     combined_candidates.append(it)
+
+            # Поиск по конкретным сущностям из декомпозиции (например 'Герань-5', 'Князь Вандал', 'Охотник')
+            if specific_entities:
+                for ent in specific_entities[:6]:
+                    ent_items = storage.search_news_feed(ent, limit=15)
+                    for it in ent_items:
+                        key = it.get("url") or it.get("item_hash") or it.get("title")
+                        if key and key not in seen:
+                            seen.add(key)
+                            combined_candidates.append(it)
+                            search_items.append(it)
 
             if not combined_candidates:
                 return []
@@ -85,13 +100,25 @@ class DeepSearchEngine:
             logger.error(f"Ошибка при поиске по собственным источникам: {e}")
             return []
 
-    async def search_web(self, query: str, limit: int = 4, timeout: float = 8.0) -> List[Dict[str, Any]]:
+    async def search_web(self, query: str, limit: int = 4, timeout: float = 12.0, use_google_ai: bool = True) -> List[Dict[str, Any]]:
         """
         Контур 2: Внешний поиск по открытым авторитетным источникам (Web).
-        Опрашивает поисковые шлюзы DuckDuckGo (HTML / Lite) без API-ключей.
-        Использует локальный прокси Xray (127.0.0.1:10809) для надежного обхода блокировок.
+        1. Если включен Google 'Режим ИИ' и задан GEMINI_API_KEY — опрашивает Google Search Grounding.
+        2. Фоллбэк — поисковые шлюзы DuckDuckGo (HTML / Lite) через локальный Xray-прокси.
         """
         results: List[Dict[str, Any]] = []
+
+        # 1. Попытка через Google 'Режим ИИ' (Gemini Search Grounding)
+        if use_google_ai and self.google_grounding.is_available():
+            try:
+                g_res = await self.google_grounding.search_and_ground(query, timeout=min(timeout, 30.0))
+                if g_res and g_res.get("sources"):
+                    results = g_res["sources"][:limit]
+            except Exception as ge:
+                logger.debug(f"Google Grounding error, fallback to DuckDuckGo: {ge}")
+
+        if results:
+            return self.trust_manager.enrich_items(results)
         headers = {
             "User-Agent": USER_AGENT,
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -440,12 +467,26 @@ class DeepSearchEngine:
         if include_darknet is None:
             include_darknet = storage.is_darknet_search_enabled()
 
+        use_google_ai = storage.is_google_ai_search_enabled()
+
         clean_query = query.strip()
         search_core, target_channels = self.semantic_engine.extract_search_intent(clean_query)
 
+        # Фаза 1: Декомпозиция запроса (Qwen / LLM Планировщик выявляет конкретные модели и системы)
+        decomp = await self.decomposer.decompose(clean_query, llm_router=llm_router)
+        specific_entities = decomp.get("specific_entities", [])
+        search_queries = decomp.get("search_queries", [clean_query])
+
         # 1. Запуск поиска по всем контурам параллельно
-        user_sources_task = self.search_user_sources(search_core, storage, limit=5, target_channels=target_channels)
-        web_sources_task = self.search_web(search_core, limit=4)
+        user_sources_task = self.search_user_sources(
+            search_core,
+            storage,
+            limit=5,
+            target_channels=target_channels,
+            specific_entities=specific_entities
+        )
+        web_query = search_queries[0] if search_queries else search_core
+        web_sources_task = self.search_web(web_query, limit=4, use_google_ai=use_google_ai)
         darknet_task = self.search_darknet(search_core, limit=4) if include_darknet else None
 
         tasks = [user_sources_task, web_sources_task]
@@ -462,7 +503,13 @@ class DeepSearchEngine:
         if len(user_sources) == 0 and refresh_collector_func:
             try:
                 await refresh_collector_func()
-                user_sources = await self.search_user_sources(search_core, storage, limit=5, target_channels=target_channels)
+                user_sources = await self.search_user_sources(
+                    search_core,
+                    storage,
+                    limit=5,
+                    target_channels=target_channels,
+                    specific_entities=specific_entities
+                )
             except Exception as ref_err:
                 logger.warning(f"Refresh before deep search failed: {ref_err}")
 
@@ -504,8 +551,10 @@ class DeepSearchEngine:
                 darknet_sources_text = "В проиндексированном теневом сегменте (.onion / Darknet) прямых упоминаний и активных утечек по теме не обнаружено."
 
         # 3. Подготовка промпта для ИИ-аналитика
+        entities_header = f"ВЫЯВЛЕННЫЕ КЛЮЧЕВЫЕ МОДЕЛИ И СИСТЕМЫ ДЛЯ АНАЛИЗА: {', '.join(specific_entities)}\n\n" if specific_entities else ""
         ai_prompt = (
             f"Тема поискового запроса: «{clean_query}»\n\n"
+            f"{entities_header}"
             f"Ниже представлены собранные разведданные по контурам:\n\n"
             f"=== КОНТУР 1: ИСТОЧНИКИ ПОЛЬЗОВАТЕЛЯ (Telegram-каналы, авторские каналы, RSS) ===\n"
             f"{user_sources_text}\n\n"

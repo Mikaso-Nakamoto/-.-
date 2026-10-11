@@ -43,14 +43,28 @@ def get_darknet_keyboard(is_enabled: bool) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="🏠 Главное меню", callback_data="btn_menu")]
     ])
 
-def get_search_result_keyboard(is_darknet_enabled: bool) -> InlineKeyboardMarkup:
-    darknet_label = "🧅 Darknet: ВКЛ (отключить)" if is_darknet_enabled else "🧅 Darknet: ВЫКЛ (включить)"
-    cb_data = "btn_darknet_off" if is_darknet_enabled else "btn_darknet_on"
+def get_search_settings_keyboard(is_darknet: bool, is_google_ai: bool) -> InlineKeyboardMarkup:
+    google_label = "🌐 Google AI Search: ВКЛ" if is_google_ai else "🌐 Google AI Search: ВЫКЛ"
+    google_cb = "btn_google_off" if is_google_ai else "btn_google_on"
+    darknet_label = "🧅 Darknet (.onion): ВКЛ" if is_darknet else "🧅 Darknet (.onion): ВЫКЛ"
+    darknet_cb = "btn_darknet_off" if is_darknet else "btn_darknet_on"
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=google_label, callback_data=google_cb)],
+        [InlineKeyboardButton(text=darknet_label, callback_data=darknet_cb)],
+        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="btn_menu")]
+    ])
+
+def get_search_result_keyboard(is_darknet_enabled: bool, is_google_ai_enabled: bool = False) -> InlineKeyboardMarkup:
+    google_label = "🌐 Google AI: ВКЛ" if is_google_ai_enabled else "🌐 Google AI: ВЫКЛ"
+    google_cb = "btn_google_off" if is_google_ai_enabled else "btn_google_on"
+    darknet_label = "🧅 Tor: ВКЛ" if is_darknet_enabled else "🧅 Tor: ВЫКЛ"
+    dark_cb = "btn_darknet_off" if is_darknet_enabled else "btn_darknet_on"
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text=darknet_label, callback_data=cb_data),
-            InlineKeyboardButton(text="🏠 Главное меню", callback_data="btn_menu")
-        ]
+            InlineKeyboardButton(text=google_label, callback_data=google_cb),
+            InlineKeyboardButton(text=darknet_label, callback_data=dark_cb)
+        ],
+        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="btn_menu")]
     ])
 
 def get_digest_feedback_keyboard(web_app_url: Optional[str] = None, md_file_id: Optional[str] = None) -> InlineKeyboardMarkup:

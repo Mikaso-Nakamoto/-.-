@@ -465,6 +465,14 @@ class Storage:
         """Переключает тумблер поиска в Darknet (.onion)"""
         self.set_setting("darknet_search_enabled", "true" if enabled else "false")
 
+    def is_google_ai_search_enabled(self) -> bool:
+        """Включен ли поиск через Google 'Режим ИИ' (Gemini Search Grounding)"""
+        return self.get_setting("google_ai_search_enabled", "true") == "true"
+
+    def set_google_ai_search(self, enabled: bool):
+        """Переключает тумблер поиска через Google 'Режим ИИ'"""
+        self.set_setting("google_ai_search_enabled", "true" if enabled else "false")
+
     # --------------------------------------------------------------------------
     # История диалога
     # --------------------------------------------------------------------------
