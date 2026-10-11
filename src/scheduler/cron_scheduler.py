@@ -223,36 +223,50 @@ class DigestScheduler:
             collector = TelegramWebCollector([{"username": "medvedev_telegram", "category": "Заявления & Геополитика"}])
             items = await collector.fetch_all(limit_per_channel=5)
 
-            for it in items:
+            unseen_items = [
+                it for it in items
+                if it.get("url") and not self.builder.storage.is_medvedev_post_seen(it.get("url"))
+            ]
+
+            # Защита от спама при холодном старте с пустой базой:
+            # если накопилось сразу много постов, маркируем старые в БД и шлем алерт только на самый свежий
+            if len(unseen_items) > 2:
+                for it in unseen_items[:-1]:
+                    self.builder.storage.mark_medvedev_post_seen(it.get("url"))
+                    self.builder.storage.save_news_items([it])
+                items_to_alert = [unseen_items[-1]]
+            else:
+                items_to_alert = unseen_items
+
+            for it in items_to_alert:
                 url = it.get("url") or ""
                 if not url:
                     continue
 
-                if not self.builder.storage.is_medvedev_post_seen(url):
-                    logger.info(f"⚡️ Обнаружено новое заявление в канале @medvedev_telegram: {url}")
-                    self.builder.storage.mark_medvedev_post_seen(url)
-                    self.builder.storage.save_news_items([it])
+                logger.info(f"⚡️ Обнаружено новое заявление в канале @medvedev_telegram: {url}")
+                self.builder.storage.mark_medvedev_post_seen(url)
+                self.builder.storage.save_news_items([it])
 
-                    content = (it.get("content") or "").strip()
-                    title = it.get("title", "Заявление Дмитрия Медведева")
+                content = (it.get("content") or "").strip()
+                title = it.get("title", "Заявление Дмитрия Медведева")
 
-                    # Экспресс-обработка поста через ИИ в первую очередь
-                    ai_analysis = ""
-                    try:
-                        ai_prompt = (
-                            f"Текст заявления Дмитрия Медведева:\n{content[:3000]}\n\n"
-                            "Сделай емкий экспресс-анализ в 2-3 предложениях на русском языке: "
-                            "каков ключевой политический посыл, кому адресован сигнал и какие прямые последствия озвучены."
-                        )
-                        res = await self.builder.router.generate_response(
-                            task="chat",
-                            user_prompt=ai_prompt,
-                            override_system_prompt="Ты высококлассный аналитик геополитики. Выдели главное зерно заявления Дмитрия Медведева без лишней воды."
-                        )
-                        if res.get("success"):
-                            ai_analysis = res.get("content", "").strip()
-                    except Exception as ai_err:
-                        logger.warning(f"ИИ-анализ поста Медведева: {ai_err}")
+                # Экспресс-обработка поста через ИИ в первую очередь
+                ai_analysis = ""
+                try:
+                    ai_prompt = (
+                        f"Текст заявления Дмитрия Медведева:\n{content[:3000]}\n\n"
+                        "Сделай емкий экспресс-анализ в 2-3 предложениях на русском языке: "
+                        "каков ключевой политический посыл, кому адресован сигнал и какие прямые последствия озвучены."
+                    )
+                    res = await self.builder.router.generate_response(
+                        task="chat",
+                        user_prompt=ai_prompt,
+                        override_system_prompt="Ты высококлассный аналитик геополитики. Выдели главное зерно заявления Дмитрия Медведева без лишней воды."
+                    )
+                    if res.get("success"):
+                        ai_analysis = res.get("content", "").strip()
+                except Exception as ai_err:
+                    logger.warning(f"ИИ-анализ поста Медведева: {ai_err}")
 
                     msg_text = (
                         "⚡️ <b>Дмитрий Анатольевич вещает!</b>\n\n"
