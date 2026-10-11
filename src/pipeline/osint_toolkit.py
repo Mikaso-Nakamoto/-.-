@@ -477,10 +477,10 @@ class OSINTToolkit:
         return data
 
     # =========================================================================
-    # 5. Разведка по номеру телефона (Phone OSINT / phonenumbers)
+    # 5. Разведка по номеру телефона (Phone OSINT / MNP / phonenumbers)
     # =========================================================================
     async def investigate_phone(self, phone: str) -> Dict[str, Any]:
-        """Разведка по номеру телефона: форматирование, страна, оператор, ссылки на проверку"""
+        """Разведка по номеру телефона: MNP-перенос, оператор, регион, маски поиска и мессенджеры"""
         clean_phone = re.sub(r'[^\d+]', '', phone.strip())
         if not clean_phone.startswith("+"):
             if clean_phone.startswith("8") and len(clean_phone) == 11:
@@ -488,30 +488,93 @@ class OSINTToolkit:
             elif clean_phone.startswith("7") and len(clean_phone) == 11:
                 clean_phone = "+" + clean_phone
 
+        digits = clean_phone.lstrip("+")
+        formatted_ru = clean_phone
+        if digits.startswith("7") and len(digits) == 11:
+            formatted_ru = f"+7 ({digits[1:4]}) {digits[4:7]}-{digits[7:9]}-{digits[9:11]}"
+
         data: Dict[str, Any] = {
             "entity": clean_phone,
+            "formatted": formatted_ru,
             "type": "phone",
             "country": None,
+            "region": None,
             "carrier": None,
+            "original_carrier": None,
+            "mnp_ported": False,
             "valid": True,
+            "search_dorks": [
+                f'"{formatted_ru}" OR "{digits}" OR "8{digits[1:]}"',
+                f'"{formatted_ru}" site:avito.ru OR site:auto.ru',
+                f'"{formatted_ru}" site:hh.ru OR site:vk.com'
+            ],
             "search_links": [
-                f"https://t.me/+{clean_phone.lstrip('+')}",
-                f"https://api.whatsapp.com/send?phone={clean_phone.lstrip('+')}",
-                f"https://www.google.com/search?q=\"{urllib.parse.quote(clean_phone)}\"",
-                f"https://yandex.ru/search/?text=\"{urllib.parse.quote(clean_phone)}\"",
-                f"https://sync.me/search/?number={clean_phone.lstrip('+')}"
+                {"name": "Telegram контакт", "url": f"https://t.me/+{digits}"},
+                {"name": "WhatsApp чат", "url": f"https://wa.me/{digits}"},
+                {"name": "GetContact (теги записных книжек)", "url": "https://web.getcontact.com"},
+                {"name": "Truecaller профиль", "url": f"https://www.truecaller.com/search/ru/+{digits}"},
+                {"name": "Sync.me проверка", "url": f"https://sync.me/search/?number={digits}"},
+                {"name": "Поиск в Яндексе", "url": f"https://yandex.ru/search/?text=%22{urllib.parse.quote(formatted_ru)}%22"},
+                {"name": "Поиск в Google", "url": f"https://www.google.com/search?q=%22{urllib.parse.quote(formatted_ru)}%22"}
             ]
         }
 
+        # 1. Статический DEF-справочник Россвязи через phonenumbers
         try:
             import phonenumbers
             from phonenumbers import geocoder, carrier
             parsed = phonenumbers.parse(clean_phone, None)
             data["valid"] = phonenumbers.is_valid_number(parsed)
             data["country"] = geocoder.description_for_number(parsed, "ru") or geocoder.description_for_number(parsed, "en")
-            data["carrier"] = carrier.name_for_number(parsed, "ru") or carrier.name_for_number(parsed, "en")
+            def_carrier = carrier.name_for_number(parsed, "ru") or carrier.name_for_number(parsed, "en")
+            data["carrier"] = def_carrier
+            data["original_carrier"] = def_carrier
         except Exception:
             pass
+
+        # 2. Динамическая проверка MNP (Mobile Number Portability — перенос номера)
+        if digits.startswith("7") and len(digits) == 11:
+            async with httpx.AsyncClient(timeout=4.0) as client:
+                # Попытка 1: Официальный шлюз детекции оператора Т-Банк / ЦНИИС
+                try:
+                    mnp_url = f"https://api.tinkoff.ru/v1/operator_detection?phone=%2B{digits}"
+                    resp = await client.get(mnp_url, headers={"User-Agent": "Mozilla/5.0"})
+                    if resp.status_code == 200:
+                        payload = resp.json().get("payload", {})
+                        real_carrier = payload.get("carrier")
+                        region = payload.get("region")
+                        if real_carrier:
+                            data["mnp_checked"] = True
+                            if data.get("original_carrier") and real_carrier.lower() not in data["original_carrier"].lower():
+                                data["carrier"] = f"{real_carrier} (перенесен по MNP из {data['original_carrier']})"
+                                data["mnp_ported"] = True
+                            else:
+                                data["carrier"] = real_carrier
+                        if region:
+                            data["region"] = region
+                except Exception:
+                    pass
+
+                # Попытка 2: Резервный шлюз voxlink если первая попытка недоступна
+                if not data.get("mnp_checked"):
+                    try:
+                        vox_url = f"https://num.voxlink.ru/get/?num={digits}"
+                        resp2 = await client.get(vox_url)
+                        if resp2.status_code == 200:
+                            v_data = resp2.json()
+                            op = v_data.get("operator")
+                            reg = v_data.get("region")
+                            if op:
+                                data["mnp_checked"] = True
+                                if data.get("original_carrier") and op.lower() not in data["original_carrier"].lower():
+                                    data["carrier"] = f"{op} (перенесен по MNP из {data['original_carrier']})"
+                                    data["mnp_ported"] = True
+                                else:
+                                    data["carrier"] = op
+                            if reg and not data.get("region"):
+                                data["region"] = reg
+                    except Exception:
+                        pass
 
         return data
 
@@ -725,24 +788,61 @@ class OSINTToolkit:
         if not llm_router:
             return self._build_fallback_report(target, raw_data)
 
-        system_prompt = (
-            "ТЫ — ВЕДУЩИЙ ОФИЦЕР ТЕХНИЧЕСКОЙ РАЗВЕДКИ OSINT РАЗВЕДЦЕНТРА «АГЕНТ СНОУДЕН» (2026 год).\n"
-            "Твоя задача — проанализировать собранную техническую телеметрию (DNS, субдомены, открытые порты, аккаунты, GeoIP, CVE) "
-            "и сформировать исчерпывающее аналитическое досье по стандартам OSINT Framework.\n\n"
-            "СТРУКТУРА ОТВЕТА (СТРОГО TELEGRAM HTML):\n"
-            "1. 🎯 <b>OSINT-заключение и оценка рисков:</b>\n"
-            "   - Краткий вывод о природе объекта, уровень критичности, кому принадлежит.\n"
-            "2. 🔍 <b>Технический профиль и цифровой след:</b>\n"
-            "   - Все обнаруженные факты (IP, провайдер, страна, открытые порты, субдомены или найденные профили).\n"
-            "3. 🛡 <b>Векторы атак, утечки и открытые интерфейсы:</b>\n"
-            "   - Где обнаружены уязвимости, экспонированные службы или следы компрометации.\n"
-            "4. 📌 <b>Рекомендации по дальнейшей разведке / защите:</b>\n"
-            "   - Конкретные шаги (применение dorking, Shodan, проверка утечек, закрытие портов).\n\n"
-            "СТРОЖАЙШИЕ ПРАВИЛА ВЕРСТКИ:\n"
-            "- Используй ТОЛЬКО разрешенный Telegram HTML (<b>, <i>, <code>, <blockquote>, <a href=\"...\">).\n"
-            "- КАТЕГОРИЧЕСКИ ЗАПРЕЩЕН Markdown (**жирный**, ```код```)!\n"
-            "- Запрещено оборачивать весь текст в giant <blockquote>! Цитаты только для прямых реплик в 1-2 строки."
-        )
+        if etype == "phone":
+            system_prompt = (
+                "ТЫ — АНАЛИТИК ТЕЛЕКОМ-РАЗВЕДКИ И ЦИФРОВОГО СЛЕДА («АГЕНТ СНОУДЕН», 2026 год).\n"
+                "ОБЪЕКТ АНАЛИЗА: НОМЕР ТЕЛЕФОНА (физическое лицо / абонент сотовой сети).\n\n"
+                "СТРОЖАЙШИЙ ЗАПРЕТ:\n"
+                "- КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО писать про IP-адреса, открытые порты, серверные службы или Shodan!\n"
+                "- Номер телефона — это персональный идентификатор человека в мобильной сети, а не сервер и не веб-сайт.\n\n"
+                "СТРУКТУРА ОТВЕТА (СТРОГО TELEGRAM HTML, НИКАКОГО MARKDOWN):\n"
+                "1. 📱 <b>Анализ сотового оператора и региона:</b>\n"
+                "   - Реальный текущий оператор (с учетом MNP-переноса номера) и исходный диапазон Россвязи.\n"
+                "   - Домашний регион регистрации SIM-карты.\n"
+                "2. 🔍 <b>Цифровой след и мессенджеры:</b>\n"
+                "   - Доступность в Telegram и WhatsApp.\n"
+                "   - Как работают базы телефонных книг (GetContact, Truecaller, Sync.me) для установления имени владельца.\n"
+                "   - Поисковые маски для поиска объявлений (Авито, резюме, доски объявлений).\n"
+                "3. 🛡 <b>Риски утечек и векторов социальной инженерии:</b>\n"
+                "   - Угрозы со стороны сливов баз доставки/маркетплейсов (СДЭК, Яндекс.Еда) и банковского СБП-сканирования.\n"
+                "4. 📌 <b>Рекомендации по защите приватности:</b>\n"
+                "   - Скрытие номера в настройках Telegram («Кто видит мой номер: Никто»).\n"
+                "   - Защита от спам-звонков, банковских мошенников и социальной инженерии.\n\n"
+                "ПРАВИЛА ОФОРМЛЕНИЯ:\n"
+                "- Используй ТОЛЬКО Telegram HTML (<b>, <i>, <code>, <a href=\"...\">).\n"
+                "- Никогда не пиши сырой Markdown вроде [ссылка](url).\n"
+                "- Ссылки оформляй аккуратно через HTML: <a href=\"...\">Название</a>."
+            )
+        elif etype in ("username", "email"):
+            system_prompt = (
+                f"ТЫ — СПЕЦИАЛИСТ OSINT ПО ЦИФРОВОМУ СЛЕДУ И ПРОФИЛИРОВАНИЮ ({etype.upper()}).\n"
+                "СТРОЖАЙШИЙ ЗАПРЕТ: КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО упоминать порты, серверные службы, nmap или Shodan.\n\n"
+                "СТРУКТУРА ОТВЕТА (СТРОГО TELEGRAM HTML):\n"
+                "1. 🎯 <b>Профиль цифрового следа:</b> обнаруженные сервисы, платформы, привязки.\n"
+                "2. 🔍 <b>Перекрестный анализ:</b> никнейм/почта на форумах, в репозиториях кода, соцсетях.\n"
+                "3. 🛡 <b>Риски компрометации:</b> утечки в базах данных (HaveIBeenPwned), фишинг.\n"
+                "4. 📌 <b>Рекомендации по безопасности:</b> сменяемость паролей, 2FA, разделение контактов.\n\n"
+                "Используй ТОЛЬКО Telegram HTML (<b>, <i>, <code>, <a href=\"...\">)."
+            )
+        else:
+            system_prompt = (
+                "ТЫ — ВЕДУЩИЙ ОФИЦЕР ТЕХНИЧЕСКОЙ РАЗВЕДКИ OSINT РАЗВЕДЦЕНТРА «АГЕНТ СНОУДЕН» (2026 год).\n"
+                "Твоя задача — проанализировать собранную техническую телеметрию (DNS, субдомены, открытые порты, аккаунты, GeoIP, CVE) "
+                "и сформировать исчерпывающее аналитическое досье по стандартам OSINT Framework.\n\n"
+                "СТРУКТУРА ОТВЕТА (СТРОГО TELEGRAM HTML):\n"
+                "1. 🎯 <b>OSINT-заключение и оценка рисков:</b>\n"
+                "   - Краткий вывод о природе объекта, уровень критичности, кому принадлежит.\n"
+                "2. 🔍 <b>Технический профиль и цифровой след:</b>\n"
+                "   - Все обнаруженные факты (IP, провайдер, страна, открытые порты, субдомены или найденные профили).\n"
+                "3. 🛡 <b>Векторы атак, утечки и открытые интерфейсы:</b>\n"
+                "   - Где обнаружены уязвимости, экспонированные службы или следы компрометации.\n"
+                "4. 📌 <b>Рекомендации по дальнейшей разведке / защите:</b>\n"
+                "   - Конкретные шаги (применение dorking, Shodan, проверка утечек, закрытие портов).\n\n"
+                "СТРОЖАЙШИЕ ПРАВИЛА ВЕРСТКИ:\n"
+                "- Используй ТОЛЬКО разрешенный Telegram HTML (<b>, <i>, <code>, <blockquote>, <a href=\"...\">).\n"
+                "- КАТЕГОРИЧЕСКИ ЗАПРЕЩЕН Markdown (**жирный**, ```код```)!\n"
+                "- Запрещено оборачивать весь текст в giant <blockquote>! Цитаты только для прямых реплик в 1-2 строки."
+            )
 
         user_prompt = f"Цель разведки: «{target}» (Тип: {etype})\n\nСобранные технические телеметрические данные:\n{raw_json_str}"
 
@@ -836,14 +936,29 @@ class OSINTToolkit:
                 lines.append(f"• <a href=\"{b_link}\">{urllib.parse.urlparse(b_link).netloc}</a>")
 
         elif t == "phone":
-            lines.append(f"📱 <b>Анализ телефонного номера:</b> <code>{html.escape(target)}</code>")
-            if data.get("country"):
-                lines.append(f"• Страна / Регион: <b>{data.get('country')}</b>")
+            formatted = data.get("formatted") or target
+            lines.append(f"📱 <b>Разведка телефонного номера:</b> <code>{html.escape(formatted)}</code>\n")
             if data.get("carrier"):
                 lines.append(f"• Оператор связи: <b>{data.get('carrier')}</b>")
-            lines.append("\n🔗 <b>Поиск в мессенджерах и поисковиках:</b>")
-            for link in data.get("search_links", []):
-                lines.append(f"• <a href=\"{link}\">{urllib.parse.urlparse(link).netloc}</a>")
+            if data.get("region"):
+                lines.append(f"• Домашний регион: <b>{data.get('region')}</b>")
+            elif data.get("country"):
+                lines.append(f"• Страна / Регион: <b>{data.get('country')}</b>")
+
+            dorks = data.get("search_dorks", [])
+            if dorks:
+                lines.append("\n🔎 <b>Поисковые маски для объявлений (Avito / резюме):</b>")
+                for d in dorks[:2]:
+                    lines.append(f"• <code>{html.escape(d)}</code>")
+
+            links = data.get("search_links", [])
+            if links:
+                lines.append("\n🔗 <b>Мессенджеры и проверка записных книжек:</b>")
+                for it in links:
+                    if isinstance(it, dict):
+                        lines.append(f"• <a href=\"{it['url']}\">{it['name']}</a>")
+                    elif isinstance(it, str):
+                        lines.append(f"• <a href=\"{it}\">{urllib.parse.urlparse(it).netloc}</a>")
 
         elif t == "cve":
             lines.append(f"🚨 <b>Уязвимость информационной безопасности:</b>")
