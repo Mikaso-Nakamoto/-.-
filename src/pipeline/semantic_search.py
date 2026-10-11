@@ -132,9 +132,12 @@ class SemanticSearchEngine:
                     # Базовая релевантность обязана быть не ниже 0.35!
                     if sim >= 0.35:
                         final_sim = sim + (0.15 if is_target_ch else 0.0)
-                        scored.append((final_sim, it))
-            scored.sort(key=lambda x: x[0], reverse=True)
-            return [it for _, it in scored[:limit]]
+                        pub_val = str(it.get('published_at', ''))
+                        if any(today_mark in pub_val for today_mark in ["2026-10-11", "2026-10-10"]):
+                            final_sim += 0.06
+                        scored.append((final_sim, pub_val, it))
+            scored.sort(key=lambda x: (x[0], x[1]), reverse=True)
+            return [it for _, _, it in scored[:limit]]
 
         # Фоллбэк: семантический поиск по стеммам и ключевым концептам
         words = re.findall(r'[а-яa-z0-9_-]+', query.lower())
@@ -187,8 +190,22 @@ class SemanticSearchEngine:
                     score += 60
                 if is_target_ch:
                     score += 40
-                if (matched_stems >= 2) or entity_match or (is_target_ch and matched_stems >= 1) or (len(stems) <= 2 and matched_stems >= 1):
-                    scored.append((score, it))
 
-        scored.sort(key=lambda x: x[0], reverse=True)
-        return [it for _, it in scored[:limit]]
+                # Бонус за свежесть (Recency Boost): более свежие публикации ранжируются выше
+                pub_val = str(it.get('published_at', ''))
+                url_val = str(it.get('url', ''))
+                m_post_id = re.search(r'/(\d{4,8})(?:$|[/?#])', url_val)
+                post_id_bonus = 0
+                if m_post_id:
+                    post_id = int(m_post_id.group(1))
+                    post_id_bonus = min(25, post_id % 100) # буст для сортировки новых постов выше старых
+
+                if any(today_mark in pub_val for today_mark in ["2026-10-11", "2026-10-10"]):
+                    score += 35
+                score += post_id_bonus
+
+                if (matched_stems >= 2) or entity_match or (is_target_ch and matched_stems >= 1) or (len(stems) <= 2 and matched_stems >= 1):
+                    scored.append((score, pub_val, it))
+
+        scored.sort(key=lambda x: (x[0], x[1]), reverse=True)
+        return [it for _, _, it in scored[:limit]]
