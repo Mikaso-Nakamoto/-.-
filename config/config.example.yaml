@@ -10,7 +10,7 @@ llm:
   default_provider: "auto"
   timeout_seconds: 60
 
-    local:
+  local:
     enabled: true
     # LM Studio на основном игровом ПК (домашняя подсеть 192.168.0.0/24)
     base_url: "http://192.168.0.181:1234/v1"

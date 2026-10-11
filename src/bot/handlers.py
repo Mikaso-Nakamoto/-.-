@@ -193,55 +193,6 @@ CATEGORIES_MAP = {
     "general": "Общее и Новости"
 }
 
-def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: Storage, admin_id: int, scheduler=None) -> Router:
-    r = Router()
-
-    # Проверка сохраненного admin_id в SQLite
-    saved_admin = storage.get_setting("admin_id")
-    configured_admin_id = int(saved_admin) if saved_admin and saved_admin.isdigit() else admin_id
-
-    # Если admin_id равен 123456789 (шаблонный плейсхолдер из примера) — считаем ненастроенным (0)
-    if configured_admin_id == 123456789:
-        configured_admin_id = 0
-
-    def is_admin(user_id: int) -> bool:
-        nonlocal configured_admin_id
-        # Авто-привязка первого написавшего пользователя как администратора
-        if configured_admin_id == 0:
-            configured_admin_id = user_id
-            storage.set_setting("admin_id", str(user_id))
-            logger.info(f"🔑 Администратор бота успешно авто-зарегистрирован: ID={user_id}")
-            return True
-        return user_id == configured_admin_id
-
-    def get_web_app_url() -> str | None:
-        url = os.getenv("WEB_APP_URL", "").strip()
-        return url or "http://192.168.0.169:8000"
-
-    async def safe_edit_text(call: CallbackQuery, text: str, reply_markup=None):
-        try:
-            await call.answer()
-        except Exception:
-            pass
-
-        html_text = markdown_to_telegram_html(text)
-        try:
-            await call.message.edit_text(html_text, parse_mode="HTML", reply_markup=reply_markup)
-        except TelegramBadRequest as e:
-            if "message is not modified" in str(e).lower():
-                return
-            logger.warning(f"Ошибка редактирования сообщения HTML: {e}, попытка без разметки...")
-            try:
-                await call.message.edit_text(text, reply_markup=reply_markup)
-            except Exception as e2:
-                logger.error(f"Редактирование с кнопками не удалось ({e2}), пробуем без кнопок...")
-                try:
-                    await call.message.edit_text(text)
-                except Exception as e3:
-                    logger.error(f"Критическая ошибка edit_text: {e3}")
-        except Exception as e:
-            logger.error(f"Необработанная ошибка при edit_text: {e}")
-
 def split_telegram_html(text: str, max_chunk: int = 3800) -> List[str]:
     """
     Интеллектуальное разделение длинных HTML сообщений для Telegram:
@@ -306,6 +257,68 @@ def split_telegram_html(text: str, max_chunk: int = 3800) -> List[str]:
 
     return balanced_chunks
 
+def build_snowden_menu_text(
+    local_status: str = "",
+    active_prov: str = "",
+    current_model: str = "",
+    chat_active: bool = True,
+    is_test_mode: bool = False,
+    tz_name: str = "",
+    next_run: str = "",
+    tg_count: int = 0,
+    rss_count: int = 0
+) -> str:
+    return "🕶 <b>Аналитический агент Сноуден</b>"
+
+def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: Storage, admin_id: int, scheduler=None) -> Router:
+    r = Router()
+
+    # Проверка сохраненного admin_id в SQLite
+    saved_admin = storage.get_setting("admin_id")
+    configured_admin_id = int(saved_admin) if saved_admin and saved_admin.isdigit() else admin_id
+
+    # Если admin_id равен 123456789 (шаблонный плейсхолдер из примера) — считаем ненастроенным (0)
+    if configured_admin_id == 123456789:
+        configured_admin_id = 0
+
+    def is_admin(user_id: int) -> bool:
+        nonlocal configured_admin_id
+        # Авто-привязка первого написавшего пользователя как администратора
+        if configured_admin_id == 0:
+            configured_admin_id = user_id
+            storage.set_setting("admin_id", str(user_id))
+            logger.info(f"🔑 Администратор бота успешно авто-зарегистрирован: ID={user_id}")
+            return True
+        return user_id == configured_admin_id
+
+    def get_web_app_url() -> str | None:
+        url = os.getenv("WEB_APP_URL", "").strip()
+        return url or "http://192.168.0.169:8000"
+
+    async def safe_edit_text(call: CallbackQuery, text: str, reply_markup=None):
+        try:
+            await call.answer()
+        except Exception:
+            pass
+
+        html_text = markdown_to_telegram_html(text)
+        try:
+            await call.message.edit_text(html_text, parse_mode="HTML", reply_markup=reply_markup)
+        except TelegramBadRequest as e:
+            if "message is not modified" in str(e).lower():
+                return
+            logger.warning(f"Ошибка редактирования сообщения HTML: {e}, попытка без разметки...")
+            try:
+                await call.message.edit_text(text, reply_markup=reply_markup)
+            except Exception as e2:
+                logger.error(f"Редактирование с кнопками не удалось ({e2}), пробуем без кнопок...")
+                try:
+                    await call.message.edit_text(text)
+                except Exception as e3:
+                    logger.error(f"Критическая ошибка edit_text: {e3}")
+        except Exception as e:
+            logger.error(f"Необработанная ошибка при edit_text: {e}")
+
     async def send_safe_reply(msg: Message, text: str, reply_markup=None, link_preview_options: LinkPreviewOptions = None):
         # Всегда конвертируем Markdown разметку (**жирный**, *курсив*, [ссылки](url)) в валидный Telegram HTML,
         # сохраняя при этом любые уже существующие теги (<blockquote>, <b>, <code>, <a>)
@@ -333,19 +346,6 @@ def split_telegram_html(text: str, max_chunk: int = 3800) -> List[str]:
                     logger.error(f"Fallback plain text failed ({e2}): {e2}")
             except Exception as e:
                 logger.error(f"Failed to send chunk {idx}: {e}")
-
-def build_snowden_menu_text(
-    local_status: str = "",
-    active_prov: str = "",
-    current_model: str = "",
-    chat_active: bool = True,
-    is_test_mode: bool = False,
-    tz_name: str = "",
-    next_run: str = "",
-    tg_count: int = 0,
-    rss_count: int = 0
-) -> str:
-    return "🕶 <b>Аналитический агент Сноуден</b>"
 
     # --------------------------------------------------------------------------
     # Главное меню (Команда /start, /старт, /menu или кнопка "Главное меню")
