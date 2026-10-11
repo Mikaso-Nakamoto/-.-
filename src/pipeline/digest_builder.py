@@ -64,7 +64,9 @@ class DigestBuilder:
         key_channel_names = {
             "ross_name", "dyadyabatya0", "rybar", "rostov_tsargrad",
             "voennaja_svodka", "infomil_live", "medvedev_telegram",
-            "it_shelter", "github_radar", "cyberpolice_rus", "xakep_ru"
+            "mod_russia", "militarysummaryru",
+            "it_shelter", "github_radar", "prepodsteam", "bugfeature",
+            "cyberpolice_rus", "xakep_ru"
         }
 
         balanced: List[Dict[str, Any]] = []
@@ -170,6 +172,15 @@ class DigestBuilder:
             item for item in candidate_pool
             if not self._is_blacklisted(item.get("content", ""), blacklist)
         ]
+
+        # Если сеть временно недоступна и парсер вернул 0 публикаций — берем последние сохраненные из базы!
+        if not clean_items:
+            cached_db_items = self.storage.get_news_feed(limit=100)
+            clean_items = [
+                item for item in cached_db_items
+                if not self._is_blacklisted(item.get("content", ""), blacklist)
+            ]
+
         return clean_items
 
     def _convert_md_to_html_body(self, text: str) -> str:
