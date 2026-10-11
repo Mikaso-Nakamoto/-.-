@@ -894,16 +894,39 @@ def build_snowden_menu_text(
             return
 
         await msg.bot.send_chat_action(msg.chat.id, "typing")
-        all_candidates = storage.get_news_feed(limit=500)
+
         from src.pipeline.semantic_search import SemanticSearchEngine
         search_engine = SemanticSearchEngine()
-        results = await search_engine.search_posts(query, all_candidates, limit=5)
+        clean_q, target_channels = search_engine.extract_search_intent(query)
+
+        all_candidates = storage.get_news_feed(limit=500)
+
+        # Если база пуста или в ней мало постов (например, только что очистили) — оперативно собираем публикации со всех каналов!
+        if len(all_candidates) < 20:
+            try:
+                await msg.bot.send_chat_action(msg.chat.id, "typing")
+                await digest_builder.collect_fresh_news()
+                all_candidates = storage.get_news_feed(limit=500)
+            except Exception as e:
+                logger.warning(f"Оперативный сбор каналов для /find: {e}")
+
+        results = await search_engine.search_posts(clean_q, all_candidates, limit=5, target_channels=target_channels)
+
+        # Если ничего не найдено и кандидатов было мало — подтягиваем свежие посты и повторяем поиск
+        if not results and len(all_candidates) < 60:
+            try:
+                await msg.bot.send_chat_action(msg.chat.id, "typing")
+                await digest_builder.collect_fresh_news()
+                all_candidates = storage.get_news_feed(limit=500)
+                results = await search_engine.search_posts(clean_q, all_candidates, limit=5, target_channels=target_channels)
+            except Exception as e:
+                logger.warning(f"Повторный сбор новостей для /find: {e}")
 
         if not results:
-            await send_safe_reply(msg, f"🔍 По запросу <i>«{html.escape(query)}»</i> ничего не найдено в текущей базе постов.\nПопробуйте <code>/search {html.escape(query)}</code> для поиска в интернете.")
+            await send_safe_reply(msg, f"🔍 По запросу <i>«{html.escape(clean_q)}»</i> ничего не найдено в текущей базе постов.\nПопробуйте <code>/search {html.escape(clean_q)}</code> для глубокого поиска в интернете и сети Tor.")
             return
 
-        out_lines = [f"🎯 <b>Найдено в каналах по запросу:</b> <i>«{html.escape(query)}»</i>\n"]
+        out_lines = [f"🎯 <b>Найдено в каналах по запросу:</b> <i>«{html.escape(clean_q)}»</i>\n"]
         for i, it in enumerate(results, 1):
             ch = it.get("channel", "Канал")
             pub = (it.get("published_at") or "")[:10]

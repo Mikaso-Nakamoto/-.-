@@ -82,6 +82,19 @@ async def test_deep_search_flow():
     assert "https://t.me/medvedev_telegram/501" in summary
     print("✓ Fallback multi-contour summary generated cleanly with correct sections.")
 
+    print("\n=== TEST 5: Conversational Query Cleaning and Channel Extraction ===")
+    from src.pipeline.semantic_search import SemanticSearchEngine
+    sem_engine = SemanticSearchEngine()
+    test_q = 'в каком-то посте в Военной сводке или в Осведомителе вроде был пост про то, что русские подменяют картинку на украинских устройствах обнаружения дронов "Чуйка" на лягушку вместо видео с камеры русского дрона. Найди мне этот пост в канале и дай его сюда или скинь на него ссылку'
+    clean_q, targets = sem_engine.extract_search_intent(test_q)
+    assert "voennaja_svodka" in targets, "Should detect voennaja_svodka"
+    assert "infomil_live" in targets, "Should detect infomil_live (Осведомитель)"
+    assert "подменяют картинку" in clean_q, "Should extract core topic"
+    assert "в каком-то посте" not in clean_q, "Should strip conversational opener"
+    assert "скинь на него ссылку" not in clean_q, "Should strip conversational tail"
+    print(f"✓ Extracted targets: {targets}")
+    print(f"✓ Cleaned core query: «{clean_q}»")
+
     print("\n=== ALL DEEP SEARCH TESTS PASSED ===")
 
 if __name__ == "__main__":

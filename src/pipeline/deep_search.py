@@ -35,15 +35,18 @@ class DeepSearchEngine:
         self.tor_socks_proxy = os.getenv("TOR_SOCKS_PROXY", "socks5://127.0.0.1:9050")
         self.xray_http_proxy = os.getenv("HTTP_PROXY") or os.getenv("WEB_SEARCH_PROXY") or "http://127.0.0.1:10809"
 
-    async def search_user_sources(self, query: str, storage: Storage, limit: int = 5) -> List[Dict[str, Any]]:
+    async def search_user_sources(self, query: str, storage: Storage, limit: int = 5, target_channels: Optional[List[str]] = None) -> List[Dict[str, Any]]:
         """
         Контур 1: Поиск по базе собственных каналов и лент пользователя.
         Использует семантический векторизованный поиск + полнотекстовое совпадение.
         """
         try:
+            clean_q, auto_targets = self.semantic_engine.extract_search_intent(query)
+            targets = target_channels or auto_targets
+
             # Выбираем базу недавних публикаций
             feed_items = storage.get_news_feed(limit=500)
-            search_items = storage.search_news_feed(query, limit=50)
+            search_items = storage.search_news_feed(clean_q, limit=50)
 
             # Объединяем без дубликатов по url / item_hash
             seen = set()
@@ -57,8 +60,8 @@ class DeepSearchEngine:
             if not combined_candidates:
                 return []
 
-            # Семантическое ранжирование
-            ranked = await self.semantic_engine.search_posts(query, combined_candidates, limit=limit)
+            # Семантическое ранжирование с учетом целевых каналов
+            ranked = await self.semantic_engine.search_posts(clean_q, combined_candidates, limit=limit, target_channels=targets)
             results = []
             for it in ranked:
                 ch = it.get("channel", "Собственный источник")
@@ -352,11 +355,12 @@ class DeepSearchEngine:
             include_darknet = storage.is_darknet_search_enabled()
 
         clean_query = query.strip()
+        search_core, target_channels = self.semantic_engine.extract_search_intent(clean_query)
 
         # 1. Запуск поиска по всем контурам параллельно
-        user_sources_task = self.search_user_sources(clean_query, storage, limit=5)
-        web_sources_task = self.search_web(clean_query, limit=4)
-        darknet_task = self.search_darknet(clean_query, limit=4) if include_darknet else None
+        user_sources_task = self.search_user_sources(search_core, storage, limit=5, target_channels=target_channels)
+        web_sources_task = self.search_web(search_core, limit=4)
+        darknet_task = self.search_darknet(search_core, limit=4) if include_darknet else None
 
         tasks = [user_sources_task, web_sources_task]
         if darknet_task:
@@ -372,7 +376,7 @@ class DeepSearchEngine:
         if len(user_sources) == 0 and refresh_collector_func:
             try:
                 await refresh_collector_func()
-                user_sources = await self.search_user_sources(clean_query, storage, limit=5)
+                user_sources = await self.search_user_sources(search_core, storage, limit=5, target_channels=target_channels)
             except Exception as ref_err:
                 logger.warning(f"Refresh before deep search failed: {ref_err}")
 
