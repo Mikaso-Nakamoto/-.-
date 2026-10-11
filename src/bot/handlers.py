@@ -1542,16 +1542,52 @@ def build_snowden_menu_text(
         history = storage.get_chat_history(limit=6)
         latest_digest = storage.get_latest_digest()
 
-        q_lower = user_query.lower()
+        # ----------------------------------------------------------------------
+        # АВТОНОМНЫЙ ИИ-МАРШРУТИЗАТОР НАМЕРЕНИЙ (AI Intent Router)
+        # ИИ сам определяет, какую команду применить: find_post, deep_search, digest, status, chat
+        # ----------------------------------------------------------------------
+        from src.pipeline.ai_intent_router import AIIntentRouter
+        intent_router = AIIntentRouter()
+        decision = await intent_router.classify(user_query, llm_router=llm_router)
+        action = decision.get("action", "chat")
+        clean_q = decision.get("clean_query") or user_query
+        target_channels = decision.get("target_channels") or []
+        include_darknet = decision.get("include_darknet", False)
+        logger.info(f"🧠 AI Intent Router: action='{action}', query='{clean_q[:40]}', darknet={include_darknet}")
 
-        # Если пользователь просит найти конкретный пост или дать ссылку на публикацию:
-        if any(trigger in q_lower for trigger in ["найди пост", "найди мне этот пост", "найди в канале", "скинь ссылку на пост", "дай ссылку на пост"]):
+        # 1. ДЕЙСТВИЕ: find_post (поиск конкретного поста / видео / цитаты в каналах или архивах)
+        if action == "find_post":
             all_candidates = storage.get_news_feed(limit=500)
+            if len(all_candidates) < 20:
+                try:
+                    await digest_builder.collect_fresh_news()
+                    all_candidates = storage.get_news_feed(limit=500)
+                except Exception as e:
+                    logger.warning(f"Сбор каналов для AI find_post: {e}")
+
             from src.pipeline.semantic_search import SemanticSearchEngine
             search_engine = SemanticSearchEngine()
-            results = await search_engine.search_posts(user_query, all_candidates, limit=4)
+            results = await search_engine.search_posts(clean_q, all_candidates, limit=5, target_channels=target_channels)
+
+            # Если в локальном суточном буфере нет — ищем в архиве Telegram через DuckDuckGo!
+            if not results:
+                from src.pipeline.deep_search import DeepSearchEngine
+                deep_engine = DeepSearchEngine()
+                web_q = f"({' OR '.join([f'site:t.me/{c}' for c in target_channels])}) {clean_q[:140]}" if target_channels else f"site:t.me {clean_q[:140]}"
+                web_results = await deep_engine.search_web(web_q, limit=4)
+                if not web_results:
+                    web_results = await deep_engine.search_web(f"telegram {clean_q[:140]}", limit=4)
+                if web_results:
+                    results = [{
+                        "channel": w.get("trust_badge", "📱 [Архив Telegram]"),
+                        "title": w.get("title", ""),
+                        "content": w.get("snippet", ""),
+                        "url": w.get("url", ""),
+                        "published_at": ""
+                    } for w in web_results]
+
             if results:
-                out_lines = [f"🎯 <b>Нашел подходящие публикации в каналах:</b>\n"]
+                out_lines = [f"🎯 <b>Найдено в каналах по запросу:</b> <i>«{html.escape(clean_q)}»</i>\n"]
                 for i, it in enumerate(results, 1):
                     ch = it.get("channel", "Канал")
                     pub = (it.get("published_at") or "")[:10]
@@ -1564,24 +1600,18 @@ def build_snowden_menu_text(
                     )
                 await send_safe_reply(msg, "\n".join(out_lines), reply_markup=get_chat_control_keyboard())
                 return
+            else:
+                await send_safe_reply(
+                    msg,
+                    f"🔍 По запросу <i>«{html.escape(clean_q)}»</i> в архивах каналов публикаций не найдено.\n"
+                    f"Попробуйте <code>/search {html.escape(clean_q)}</code> для поиска по открытому интернету.",
+                    reply_markup=get_chat_control_keyboard()
+                )
+                return
 
-        # Если пользователь просит основательный поиск в сети / даркнете / по источникам:
-        is_deep_search_request = (
-            any(q_lower.startswith(pref) for pref in ["поиск ", "поиск: ", "поищи ", "найди информацию", "найди инфу", "пробей по источникам", "глубокий поиск", "основательный поиск"])
-            or any(kw in q_lower for kw in ["найди в интернете", "найди в вебе", "найди в даркнете", "поищи в onion", "поиск в даркнете", "поиск по onion"])
-        )
-
-        if is_deep_search_request:
-            cleaned_q = re.sub(
-                r'^(?:поиск:?|поищи|найди информацию про|найди информацию о|найди инфу про|найди инфу о|пробей по источникам|глубокий поиск:?|основательный поиск:?)\s*',
-                '',
-                user_query,
-                flags=re.IGNORECASE
-            ).strip()
-            if not cleaned_q:
-                cleaned_q = user_query
-
-            is_darknet = storage.is_darknet_search_enabled()
+        # 2. ДЕЙСТВИЕ: deep_search (глубокий поиск фактов, внешний веб, OSINT, утечки, Tor)
+        if action == "deep_search":
+            is_darknet = include_darknet or storage.is_darknet_search_enabled()
             from src.pipeline.deep_search import DeepSearchEngine
             deep_engine = DeepSearchEngine()
 
@@ -1589,7 +1619,7 @@ def build_snowden_menu_text(
                 await digest_builder.collect_fresh_news()
 
             result = await deep_engine.execute_deep_search(
-                query=cleaned_q,
+                query=clean_q,
                 storage=storage,
                 llm_router=llm_router,
                 include_darknet=is_darknet,
@@ -1598,6 +1628,45 @@ def build_snowden_menu_text(
             await send_safe_reply(msg, result["text"], reply_markup=get_search_result_keyboard(is_darknet))
             return
 
+        # 3. ДЕЙСТВИЕ: digest (генерация сводки новостей по запросу)
+        if action == "digest":
+            status_msg = await msg.answer("📰 <b>Готовлю персональную сводку по вашему запросу...</b>", parse_mode="HTML")
+            try:
+                res = await digest_builder.build_digest(custom_query=clean_q or None)
+                try:
+                    await status_msg.delete()
+                except Exception:
+                    pass
+                if res.get("success"):
+                    formatted_html = format_digest_to_collapsible_html(res.get("text", ""))
+                    await send_safe_reply(msg, formatted_html, reply_markup=get_main_menu_keyboard(chat_mode=True, web_app_url=get_web_app_url()))
+                else:
+                    await send_safe_reply(msg, f"⚠️ Не удалось сформировать сводку: {res.get('text')}")
+            except Exception as e:
+                logger.error(f"Ошибка дайджеста через AI Router: {e}")
+                await send_safe_reply(msg, f"⚠️ Ошибка при формировании сводки: {e}")
+            return
+
+        # 4. ДЕЙСТВИЕ: status (диагностика оборудования и доступности узлов)
+        if action == "status":
+            local_ok = await llm_router.check_local_health()
+            local_status = "🟢 Онлайн" if local_ok else "🔴 Офлайн"
+            active_prov = llm_router.active_provider
+            cur_model = llm_router.get_current_model_for_provider(active_prov)
+            dark_on = storage.is_darknet_search_enabled()
+            status_text = (
+                "🖥 <b>Диагностика и статус узлов «Сноуден»:</b>\n\n"
+                f"• <b>Ноутбук-сервер 24/7:</b> 🟢 В строю (Linux Mint / Docker host)\n"
+                f"• <b>Вычислительный ПК (LAN):</b> {local_status} (LM Studio)\n"
+                f"• <b>Активное ядро ИИ:</b> <code>{active_prov.upper()}</code> • <code>{cur_model}</code>\n"
+                f"• <b>Darknet (.onion):</b> {'🟢 Включен' if dark_on else '⚪️ Выключен'}\n"
+                f"• <b>База публикаций:</b> {storage.count_news_feed()} записей в памяти"
+            )
+            await send_safe_reply(msg, status_text, reply_markup=get_chat_control_keyboard())
+            return
+
+        # 5. ДЕЙСТВИЕ: chat (диалог с автоматическим веб-поиском при нехватке локальных данных)
+        q_lower = user_query.lower()
         is_news_inquiry = any(w in q_lower for w in [
             "новост", "украин", "сво", "фронт", "трамп", "войн", "политик",
             "росс", "дядя батя", "рыбар", "сводк", "ситуаци", "что произошло", "что слышно",

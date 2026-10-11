@@ -268,6 +268,13 @@ class Storage:
                 items.append(d)
             return items
 
+    def count_news_feed(self) -> int:
+        """Возвращает общее количество сохраненных постов в базе"""
+        with self._get_connection() as conn:
+            cur = conn.execute("SELECT COUNT(*) FROM news_feed")
+            row = cur.fetchone()
+            return row[0] if row else 0
+
     def search_news_feed(self, query: str, limit: int = 50, fetch_depth: int = 800) -> List[Dict[str, Any]]:
         """
         Ищет публикации в базе данных по корням слов, семантическим категориям и ключевым терминам.
