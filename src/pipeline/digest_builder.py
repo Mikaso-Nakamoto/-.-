@@ -45,107 +45,79 @@ class DigestBuilder:
                 return True
         return False
 
-    def _stratified_balance_items(self, items: List[Dict[str, Any]], target_count: int = 20) -> List[Dict[str, Any]]:
+    def _stratified_balance_items(self, items: List[Dict[str, Any]], target_count: int = 32) -> List[Dict[str, Any]]:
         """
         Стратифицированная балансировка выборки новостей по ключевым доменам:
+        - Военно-политическая хроника & СВО (Дядя Батя, Росснейм, Рыбарь)
+        - Регионы Юга & инциденты (Ростов Царьград)
+        - Кибербезопасность & Право (Киберполиция России, Хакер)
         - Полезный софт & OpenSource (IT_Shelter, GitHub Radar, OpenNet)
-        - Геополитика & СВО (Дядя Батя, Росснейм, Рыбарь, РИА, ТАСС)
-        - Кибербезопасность & IT (Хакер, CVE, OSINT)
-        - Нейросети & Железо (AI, GPU, чипы)
-        - Регионы и Экономика
+        - Мировая политика & Аналитика (РИА, ТАСС, Коммерсантъ, РБК)
+        - Технологии, Hardware & ИИ (AI, 3DNews, Rozetked)
         """
-        categorized: Dict[str, List[Dict[str, Any]]] = {}
-        for it in items:
-            cat = it.get("category", "Общее")
-            categorized.setdefault(cat, []).append(it)
+        if not items:
+            return []
 
-        priority_keywords = [
-            "софт", "soft", "opensource", "open-source", "утилит", "github", "разработк",
-            "сво", "политик", "украин", "юг", "регион", "кибер", "безопасн", "ии", "нейро", "аналитик"
-        ]
-        sorted_cats = sorted(
-            categorized.keys(),
-            key=lambda c: any(pk in c.lower() for pk in priority_keywords),
-            reverse=True
-        )
+        # Гарантированно сохраняем свежие публикации ключевых первоисточников
+        key_channel_names = {
+            "ross_name", "dyadyabatya0", "rybar", "rostov_tsargrad",
+            "it_shelter", "github_radar", "cyberpolice_rus", "xakep_ru"
+        }
 
         balanced: List[Dict[str, Any]] = []
-        for round_idx in range(4):
-            for cat in sorted_cats:
+        seen_urls = set()
+
+        for it in items:
+            ch = (it.get("channel") or "").lower().lstrip("@")
+            u = it.get("url") or ""
+            if any(k in ch for k in key_channel_names):
+                if u not in seen_urls:
+                    balanced.append(it)
+                    if u:
+                        seen_urls.add(u)
+
+        # Категоризируем оставшиеся материалы
+        categorized: Dict[str, List[Dict[str, Any]]] = {}
+        for it in items:
+            u = it.get("url") or ""
+            if u not in seen_urls:
+                cat = it.get("category", "Общее")
+                categorized.setdefault(cat, []).append(it)
+
+        # Раундовый отбор для равномерного представления всех сфер
+        categories_list = list(categorized.keys())
+        for round_idx in range(5):
+            for cat in categories_list:
                 cat_items = categorized[cat]
                 if round_idx < len(cat_items) and len(balanced) < target_count:
-                    balanced.append(cat_items[round_idx])
+                    it = cat_items[round_idx]
+                    u = it.get("url") or ""
+                    if u not in seen_urls:
+                        balanced.append(it)
+                        if u:
+                            seen_urls.add(u)
 
         if len(balanced) < target_count:
             for it in items:
-                if it not in balanced and len(balanced) < target_count:
+                u = it.get("url") or ""
+                if u not in seen_urls and len(balanced) < target_count:
                     balanced.append(it)
+                    if u:
+                        seen_urls.add(u)
 
         return balanced
 
     async def curate_items_with_ai(self, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
-        Этап 1: Быстрый ИИ-Куратор (AI Content Curator).
-        Оценивает пул собранных публикаций и отбирает от 12 до 20 самых ценных материалов,
-        гарантируя присутствие полезного софта/утилит, геополитики/СВО, кибербезопасности и ИИ,
-        и отсекая инфошум, рекламу и дубликаты.
+        Отбирает сбалансированный срез публикаций (до 30–35 материалов) со всех каналов,
+        гарантируя присутствие ключевых первоисточников (@ross_name, @Dyadyabatya0,
+        @cyberpolice_rus, @it_shelter, @github_radar, РИА, ТАСС), чтобы ИИ-синтезатор
+        мог провести кросс-сопоставление дублирующихся тем и объединить их в связный дайджест.
         """
-        if len(items) <= 15:
+        if len(items) <= 32:
             return items
 
-        from src.llm.prompts import (
-            AI_CURATOR_SYSTEM_PROMPT,
-            build_curator_user_prompt,
-            parse_curator_selection
-        )
-
-        prefs = load_preferences()
-        interests = prefs.get("interests", [])
-        learned_prefs = self.storage.get_learned_preferences_summary()
-
-        curator_user_prompt = build_curator_user_prompt(
-            candidate_items=items,
-            user_interests=interests,
-            learned_preferences=learned_prefs
-        )
-
-        try:
-            logger.info(f"Запуск ИИ-куратора для пула из {len(items)} публикаций...")
-            res = await self.router.generate_response(
-                task="curator",
-                user_prompt=curator_user_prompt,
-                override_system_prompt=AI_CURATOR_SYSTEM_PROMPT
-            )
-
-            if res.get("success"):
-                content = res.get("content", "")
-                selected_ids = parse_curator_selection(content, len(items))
-                selected_items = [items[i - 1] for i in selected_ids if 1 <= i <= len(items)]
-
-                # Если куратор отобрал достаточное число качественных статей (>= 10)
-                if len(selected_items) >= 10:
-                    logger.info(f"ИИ-куратор успешно отобрал {len(selected_items)} публикаций.")
-                    return selected_items
-                elif len(selected_items) > 0:
-                    logger.info(f"ИИ-куратор отобрал {len(selected_items)} публикаций. Дополняем стратифицированной выборкой...")
-                    fallback_pool = self._stratified_balance_items(items, target_count=20)
-                    combined = list(selected_items)
-                    seen_urls = {it.get("url") for it in combined if it.get("url")}
-                    for it in fallback_pool:
-                        u = it.get("url")
-                        if u not in seen_urls:
-                            combined.append(it)
-                            if u:
-                                seen_urls.add(u)
-                        if len(combined) >= 20:
-                            break
-                    return combined
-        except Exception as e:
-            logger.warning(f"Ошибка вызова ИИ-куратора: {e}")
-
-        # Фолбэк на стратифицированный отбор при сбое или недоступности ИИ
-        logger.info("Применение резервного стратифицированного отбора публикаций...")
-        return self._stratified_balance_items(items, target_count=20)
+        return self._stratified_balance_items(items, target_count=32)
 
     async def collect_fresh_news(self) -> List[Dict[str, Any]]:
         sources = load_sources().get("sources", {})
@@ -156,12 +128,12 @@ class DigestBuilder:
 
         if tg_channels:
             tg_collector = TelegramWebCollector(tg_channels)
-            tg_items = await tg_collector.fetch_all(limit_per_channel=15)
+            tg_items = await tg_collector.fetch_all(limit_per_channel=20)
             all_items.extend(tg_items)
 
         if rss_feeds:
             rss_collector = RSSCollector(rss_feeds)
-            rss_items = await rss_collector.fetch_all(limit_per_feed=8)
+            rss_items = await rss_collector.fetch_all(limit_per_feed=12)
             all_items.extend(rss_items)
 
         # Всегда сохраняем полный буфер свежих публикаций для чата, Discover и Android API
@@ -169,15 +141,24 @@ class DigestBuilder:
             self.storage.save_news_items(all_items)
 
         # Дедупликация через БД только для формирования утреннего дайджеста
-        unseen = self.storage.filter_unseen_items(all_items)
-        logger.info(f"Собрано {len(all_items)} публикаций, из них новых для дайджеста: {len(unseen)}")
+        if self.storage.is_test_mode():
+            candidate_pool = all_items
+        else:
+            unseen = self.storage.filter_unseen_items(all_items)
+            # Если новых публикаций накопилось мало (например, из-за тестов или ночных запросов в чате) —
+            # берем полный срез за последнее окно, чтобы ИИ всегда имел полную фактуру по всем темам!
+            if len(unseen) >= 15:
+                candidate_pool = unseen
+            else:
+                logger.info(f"Непрочитанных публикаций мало ({len(unseen)}). Используем полный срез за окно ({len(all_items)}).")
+                candidate_pool = all_items
 
         # Фильтрация по стоп-словам из preferences
         prefs = load_preferences()
         blacklist = prefs.get("filters", {}).get("blacklist", [])
 
         clean_items = [
-            item for item in unseen
+            item for item in candidate_pool
             if not self._is_blacklisted(item.get("content", ""), blacklist)
         ]
         return clean_items
@@ -464,28 +445,31 @@ class DigestBuilder:
         curated_items = await self.curate_items_with_ai(items)
         logger.info(f"Выборка сформирована: {len(curated_items)} публикаций передаются генератору дайджеста.")
 
-        # Извлекаем разнообразные изображения/обложки видео из отобранных куратором публикаций
+        # Извлекаем разнообразные изображения/обложки видео из отобранных публикаций
         source_images = []
         seen_channels = set()
         for it in curated_items:
-            img = it.get("image_url")
+            m_urls = it.get("media_urls") or []
+            cand_urls = m_urls + ([it.get("image_url")] if it.get("image_url") else [])
             ch = it.get("channel", "")
-            if img and img.startswith("http") and img not in source_images:
-                # Отдаем приоритет разнообразию источников
-                if ch not in seen_channels or len(seen_channels) >= 5:
-                    source_images.append(img)
-                    seen_channels.add(ch)
-                    if len(source_images) >= 6:
-                        break
+            for img in cand_urls:
+                if img and img.startswith("http") and img not in source_images:
+                    if ch not in seen_channels or len(seen_channels) >= 5:
+                        source_images.append(img)
+                        seen_channels.add(ch)
+                        if len(source_images) >= 6:
+                            break
 
         # Добираем до 6 изображений из общего пула, если из кураторской выборки набралось меньше
         if len(source_images) < 4:
             for it in items:
-                img = it.get("image_url")
-                if img and img.startswith("http") and img not in source_images:
-                    source_images.append(img)
-                    if len(source_images) >= 6:
-                        break
+                m_urls = it.get("media_urls") or []
+                cand_urls = m_urls + ([it.get("image_url")] if it.get("image_url") else [])
+                for img in cand_urls:
+                    if img and img.startswith("http") and img not in source_images:
+                        source_images.append(img)
+                        if len(source_images) >= 6:
+                            break
 
         lead_image_url = source_images[0] if source_images else ""
 

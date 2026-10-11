@@ -12,6 +12,8 @@ sources:
     category: Кибербезопасность & OSINT
   - username: exploitex
     category: Кибербезопасность & IT
+  - username: cyberpolice_rus
+    category: Кибербезопасность & Право
   - username: Dev_Bubble
     category: DevOps & Разработка
   - username: habr_com
@@ -37,7 +39,7 @@ sources:
   - username: ross_name
     category: Военно-политическая аналитика & СВО
   - username: Dyadyabatya0
-    category: Мировая политика & Новости
+    category: Военно-политическая аналитика & СВО
   - username: rostov_tsargrad
     category: Новости Юга & Регионы России
   - username: bbcrussian
