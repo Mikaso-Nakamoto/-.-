@@ -286,6 +286,31 @@ def split_telegram_html(text: str, max_chunk: int = 3800) -> List[str]:
             except Exception as e:
                 logger.error(f"Failed to send chunk {idx}: {e}")
 
+def build_snowden_menu_text(
+    local_status: str,
+    active_prov: str,
+    current_model: str,
+    chat_active: bool,
+    is_test_mode: bool,
+    tz_name: str,
+    next_run: str,
+    tg_count: int,
+    rss_count: int
+) -> str:
+    test_note = " <i>(🧪 тестовый режим)</i>" if is_test_mode else ""
+    return (
+        "🕶 <b>Аналитический агент Сноуден на связи.</b>\n"
+        "<i>Фильтрую инфошум, собираю проверенную фактуру со всех каналов и держу руку на пульсе.</i>\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+        f"💻 <b>Контур:</b> Ноутбук-сервер 24/7 (🟢 В строю) • ПК ({local_status})\n"
+        f"🧠 <b>Ядро аналитики:</b> <code>{active_prov.upper()}</code> • <code>{current_model}</code>\n"
+        f"📡 <b>Источники:</b> {tg_count} Telegram-каналов • {rss_count} RSS-потоков{test_note}\n"
+        f"⏰ <b>Утренняя сводка:</b> <code>08:50 ({tz_name})</code> • следующая: <code>{next_run}</code>\n"
+        f"💬 <b>Диалог в чате:</b> {'🟢 Включен (пиши прямо сюда)' if chat_active else '⚪️ Выключен (вход через /chat)'}\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "Выбирай нужный раздел в меню ниже или пользуйся списком команд <b>[/]</b>:"
+    )
+
     # --------------------------------------------------------------------------
     # Главное меню (Команда /start или кнопка "Главное меню", а также слова "старт", "меню")
     # --------------------------------------------------------------------------
@@ -308,7 +333,7 @@ def split_telegram_html(text: str, max_chunk: int = 3800) -> List[str]:
         await register_bot_commands(msg.bot)
         await state.clear()
         is_local_on = await llm_router.check_local_health()
-        local_status = "🟢 В сети (LM Studio)" if is_local_on else "🔴 Офлайн (Включен облачный резерв)"
+        local_status = "🟢 В сети (LM Studio)" if is_local_on else "🔴 Офлайн"
 
         active_prov = llm_router.active_provider
         current_model = llm_router.get_current_model_for_provider(active_prov if active_prov != "auto" else "openrouter")
@@ -320,25 +345,16 @@ def split_telegram_html(text: str, max_chunk: int = 3800) -> List[str]:
         tg_count = len(get_telegram_channels())
         rss_count = len(get_rss_feeds())
 
-        text = (
-            "🛡 <b>ТЕРМИНАЛ «АГЕНТ СНОУДЕН»</b> <code>[v2.6 // OSINT & TACTICAL INTEL]</code>\n"
-            "<i>Автономный контур стратегической аналитики и мониторинга обстановки</i>\n\n"
-            "━━━━━━━━━━━━━━━━━━━━━\n"
-            "💻 <b>АППАРАТНЫЙ КОНТУР:</b>\n"
-            "• <b>Сервер (Ноутбук 24/7):</b> 🟢 В строю • Служба активна\n"
-            f"• <b>Рабочая станция (LM Studio):</b> {local_status}\n"
-            f"• <b>Ядро аналитики:</b> <code>{active_prov.upper()}</code> • <code>{current_model}</code>\n\n"
-            "📡 <b>РАЗВЕДЫВАТЕЛЬНЫЙ ПУЛ:</b>\n"
-            f"• <b>Источники:</b> {tg_count} Telegram-каналов • {rss_count} RSS-потоков\n"
-            "• <b>Специализация:</b> СВО & Хроника атак • Геополитика • Open-Source & Софт • Кибербезопасность\n"
-            f"• <b>Режим перехвата:</b> {'🧪 Тестовый (без фиксации в БД)' if is_test_mode else '🛡 Боевой (дедупликация и архив)'}\n\n"
-            "⏳ <b>ОПЕРАТИВНЫЙ БРИФИНГ:</b>\n"
-            f"• <b>Расписание:</b> <code>08:50 ({tz_name})</code>\n"
-            f"• <b>Следующая сводка:</b> <code>{next_run}</code>\n"
-            f"• <b>Диалоговый канал:</b> {'🟢 АКТИВЕН — я на связи' if chat_active else '⚪️ Режим ожидания'}\n"
-            "━━━━━━━━━━━━━━━━━━━━━\n\n"
-            "<i>«Конфиденциальность — это право, а осведомленность — лучшая защита».</i>\n"
-            "Выберите директиву на пульте или введите команду через <b>[/]</b>:"
+        text = build_snowden_menu_text(
+            local_status=local_status,
+            active_prov=active_prov,
+            current_model=current_model,
+            chat_active=chat_active,
+            is_test_mode=is_test_mode,
+            tz_name=tz_name,
+            next_run=next_run,
+            tg_count=tg_count,
+            rss_count=rss_count
         )
         await send_safe_reply(msg, text, reply_markup=get_main_menu_keyboard(chat_active, get_web_app_url()))
 
@@ -374,7 +390,7 @@ def split_telegram_html(text: str, max_chunk: int = 3800) -> List[str]:
         await call.answer()
         await state.clear()
         is_local_on = await llm_router.check_local_health()
-        local_status = "🟢 В сети (LM Studio)" if is_local_on else "🔴 Офлайн (Включен облачный резерв)"
+        local_status = "🟢 В сети (LM Studio)" if is_local_on else "🔴 Офлайн"
         active_prov = llm_router.active_provider
         current_model = llm_router.get_current_model_for_provider(active_prov if active_prov != "auto" else "openrouter")
         chat_active = storage.is_chat_mode_active()
@@ -385,25 +401,16 @@ def split_telegram_html(text: str, max_chunk: int = 3800) -> List[str]:
         tg_count = len(get_telegram_channels())
         rss_count = len(get_rss_feeds())
 
-        text = (
-            "🛡 <b>ТЕРМИНАЛ «АГЕНТ СНОУДЕН»</b> <code>[v2.6 // OSINT & TACTICAL INTEL]</code>\n"
-            "<i>Автономный контур стратегической аналитики и мониторинга обстановки</i>\n\n"
-            "━━━━━━━━━━━━━━━━━━━━━\n"
-            "💻 <b>АППАРАТНЫЙ КОНТУР:</b>\n"
-            "• <b>Сервер (Ноутбук 24/7):</b> 🟢 В строю • Служба активна\n"
-            f"• <b>Рабочая станция (LM Studio):</b> {local_status}\n"
-            f"• <b>Ядро аналитики:</b> <code>{active_prov.upper()}</code> • <code>{current_model}</code>\n\n"
-            "📡 <b>РАЗВЕДЫВАТЕЛЬНЫЙ ПУЛ:</b>\n"
-            f"• <b>Источники:</b> {tg_count} Telegram-каналов • {rss_count} RSS-потоков\n"
-            "• <b>Специализация:</b> СВО & Хроника атак • Геополитика • Open-Source & Софт • Кибербезопасность\n"
-            f"• <b>Режим перехвата:</b> {'🧪 Тестовый (без фиксации в БД)' if is_test_mode else '🛡 Боевой (дедупликация и архив)'}\n\n"
-            "⏳ <b>ОПЕРАТИВНЫЙ БРИФИНГ:</b>\n"
-            f"• <b>Расписание:</b> <code>08:50 ({tz_name})</code>\n"
-            f"• <b>Следующая сводка:</b> <code>{next_run}</code>\n"
-            f"• <b>Диалоговый канал:</b> {'🟢 АКТИВЕН — я на связи' if chat_active else '⚪️ Режим ожидания'}\n"
-            "━━━━━━━━━━━━━━━━━━━━━\n\n"
-            "<i>«Конфиденциальность — это право, а осведомленность — лучшая защита».</i>\n"
-            "Выберите директиву на пульте или введите команду через <b>[/]</b>:"
+        text = build_snowden_menu_text(
+            local_status=local_status,
+            active_prov=active_prov,
+            current_model=current_model,
+            chat_active=chat_active,
+            is_test_mode=is_test_mode,
+            tz_name=tz_name,
+            next_run=next_run,
+            tg_count=tg_count,
+            rss_count=rss_count
         )
         await safe_edit_text(call, text, get_main_menu_keyboard(chat_active, get_web_app_url()))
 
@@ -419,10 +426,11 @@ def split_telegram_html(text: str, max_chunk: int = 3800) -> List[str]:
         active_model = llm_router.get_current_model_for_provider(active_prov if active_prov != "auto" else "openrouter")
 
         text = (
-            f"💬 *Режим диалога с ИИ активирован!*\n\n"
-            f"Нейросеть: *{active_prov.upper()}* (`{active_model}`).\n\n"
-            f"• Модель знает текущую дату (2026 год) и контекст последних собранных новостей.\n"
-            f"• Просто пишите сообщения в чат. Чтобы завершить диалог, нажмите кнопку ниже или введите /exit."
+            "💬 <b>Диалог с Агентом Сноуденом активен!</b>\n\n"
+            f"🧠 <b>Ядро:</b> <code>{active_prov.upper()}</code> (<code>{active_model}</code>)\n\n"
+            "• Я знаю актуальную дату (2026 год) и контекст всех свежих публикаций из каналов.\n"
+            "• Задавай любые вопросы по СВО, ударам, обстановке, геополитике, коду или полезному софту.\n"
+            "• Чтобы выйти из диалога обратно в меню, введи <code>/exit</code> или нажми кнопку ниже."
         )
 
         if isinstance(event, CallbackQuery):
