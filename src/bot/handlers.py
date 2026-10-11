@@ -35,6 +35,7 @@ BOT_COMMANDS = [
     BotCommand(command="del_source", description="🗑 Удалить источник"),
     BotCommand(command="refresh", description="🔄 Собрать свежие новости сейчас"),
     BotCommand(command="test_mode", description="🧪 Переключить тестовый режим"),
+    BotCommand(command="clearnews", description="🧹 Очистить базу новостей и дайджестов"),
     BotCommand(command="help", description="ℹ️ Инструкция и справка по командам"),
 ]
 
@@ -500,9 +501,9 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
             await send_safe_reply(msg, "⚠️ Планировщик фоновых задач не инициализирован.")
 
     # --------------------------------------------------------------------------
-    # Очистка базы и архивов: /clearnews или /purge
+    # Очистка базы и архивов: /clearnews или /purge или /clean_db
     # --------------------------------------------------------------------------
-    @r.message(Command("clearnews", "purge"))
+    @r.message(Command("clearnews", "purge", "clean_db"))
     async def cmd_purge_data(msg: Message):
         if not is_admin(msg.from_user.id):
             return

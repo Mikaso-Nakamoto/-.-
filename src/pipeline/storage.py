@@ -189,6 +189,11 @@ class Storage:
             conn.execute("DELETE FROM full_digests")
             conn.execute("DELETE FROM digest_history")
             conn.execute("DELETE FROM chat_history")
+            conn.commit()
+            try:
+                conn.execute("VACUUM")
+            except Exception:
+                pass
 
     def is_youtube_video_seen(self, video_url: str) -> bool:
         """Проверяет, было ли уже отправлено уведомление об этом видео"""
