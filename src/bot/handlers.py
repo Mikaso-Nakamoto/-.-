@@ -309,12 +309,9 @@ def split_telegram_html(text: str, max_chunk: int = 3800) -> List[str]:
     return balanced_chunks
 
     async def send_safe_reply(msg: Message, text: str, reply_markup=None, link_preview_options: LinkPreviewOptions = None):
-        # Если текст уже содержит HTML разметку Telegram (<b>, <a>, <blockquote>),
-        # не прогоняем через markdown_to_telegram_html повторно, чтобы не ломать теги!
-        if "<b" in text or "<a " in text or "<blockquote" in text or "<code" in text:
-            html_text = text
-        else:
-            html_text = markdown_to_telegram_html(text)
+        # Всегда конвертируем Markdown разметку (**жирный**, *курсив*, [ссылки](url)) в валидный Telegram HTML,
+        # сохраняя при этом любые уже существующие теги (<blockquote>, <b>, <code>, <a>)
+        html_text = markdown_to_telegram_html(text)
 
         chunks = split_telegram_html(html_text, max_chunk=3800)
 
@@ -1363,10 +1360,21 @@ def build_snowden_menu_text(
 
         sorted_items = sorted(candidate_items, key=item_score, reverse=True)
 
-        # 4. Извлечение реальных фотографий из наиболее релевантных постов
+        # 4. Извлечение реальных фотографий: отбираем фото, строго соответствующие теме запроса
+        is_combat_inquiry = any(w in q_lower for w in ["фронт", "сво", "удар", "дрон", "бпла", "прилет", "атак", "обстрел", "бой"])
         relevant_photos = []
-        top_candidates = [it for it in sorted_items if item_score(it) >= 30] or sorted_items[:3]
-        for it in top_candidates[:4]:
+
+        photo_candidates = []
+        for it in sorted_items:
+            tit_low = str(it.get("title", "")).lower()
+            if is_combat_inquiry:
+                # Исключаем фото чисто политических речей/пресс-конференций, если вопрос о боевых действиях
+                if any(k in tit_low for k in ["трамп", "байден", "конгресс", "белый дом"]) and not any(k in tit_low for k in ["удар", "дрон", "фронт", "ростов"]):
+                    continue
+            photo_candidates.append(it)
+
+        top_candidates = photo_candidates[:4] if photo_candidates else sorted_items[:3]
+        for it in top_candidates:
             for img in it.get("media_urls", []):
                 if img and img.startswith("http") and img not in relevant_photos:
                     relevant_photos.append(img)
