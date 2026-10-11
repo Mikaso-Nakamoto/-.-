@@ -76,8 +76,14 @@ class DeepSearchEngine:
             if not combined_candidates:
                 return []
 
-            # Семантическое ранжирование с учетом целевых каналов
-            ranked = await self.semantic_engine.search_posts(clean_q, combined_candidates, limit=limit, target_channels=targets)
+            # Семантическое ранжирование с учетом целевых каналов и выявленных сущностей
+            ranked = await self.semantic_engine.search_posts(
+                clean_q,
+                combined_candidates,
+                limit=limit,
+                target_channels=targets,
+                specific_entities=specific_entities
+            )
             if not ranked and search_items:
                 ranked = search_items[:limit]
 
@@ -101,15 +107,34 @@ class DeepSearchEngine:
             logger.error(f"Ошибка при поиске по собственным источникам: {e}")
             return []
 
-    async def search_web(self, query: str, limit: int = 4, timeout: float = 12.0, use_google_ai: bool = True) -> List[Dict[str, Any]]:
+    async def search_web(
+        self,
+        query: str,
+        limit: int = 4,
+        timeout: float = 12.0,
+        use_google_ai: bool = True,
+        llm_router: Optional[LLMRouter] = None,
+        fallback_queries: Optional[List[str]] = None
+    ) -> List[Dict[str, Any]]:
         """
         Контур 2: Внешний поиск по открытым авторитетным источникам (Web).
         1. Если включен Google 'Режим ИИ' и задан GEMINI_API_KEY — опрашивает Google Search Grounding.
-        2. Фоллбэк — поисковые шлюзы DuckDuckGo (HTML / Lite) через локальный Xray-прокси.
+        2. Фоллбэк 1 — поисковые шлюзы DuckDuckGo (HTML / Lite) через локальный Xray-прокси.
+        3. Фоллбэк 2 — энциклопедический поиск Wikipedia API.
+        4. Фоллбэк 3 — каскадный поиск по декомпозированным подзапросам fallback_queries.
         """
         results: List[Dict[str, Any]] = []
 
         # 1. Попытка через Google 'Режим ИИ' (Gemini Search Grounding)
+        if llm_router and llm_router.config.gemini.api_key:
+            self.google_grounding.api_key = llm_router.config.gemini.api_key
+        elif not self.google_grounding.api_key:
+            try:
+                cfg = load_app_config()
+                self.google_grounding.api_key = cfg.llm.gemini.api_key or os.getenv("GEMINI_API_KEY")
+            except Exception:
+                pass
+
         if use_google_ai and self.google_grounding.is_available():
             try:
                 g_res = await self.google_grounding.search_and_ground(query, timeout=min(timeout, 30.0))
@@ -120,13 +145,14 @@ class DeepSearchEngine:
 
         if results:
             return self.trust_manager.enrich_items(results)
+
         headers = {
             "User-Agent": USER_AGENT,
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
         }
 
-        # 1. Пробуем DuckDuckGo HTML интерфейс (сначала через Xray-прокси, затем напрямую)
+        # 2. DuckDuckGo HTML интерфейс (сначала через Xray-прокси, затем напрямую)
         ddg_url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(query)}"
         client_configs = []
         if self.xray_http_proxy:
@@ -169,7 +195,7 @@ class DeepSearchEngine:
             except Exception as e:
                 logger.debug(f"Web search attempt ({cfg}) error: {e}")
 
-        # 2. Если DuckDuckGo HTML не вернул результат, пробуем Lite версию
+        # 3. Если DuckDuckGo HTML не вернул результат, пробуем Lite версию
         if not results:
             lite_url = "https://lite.duckduckgo.com/lite/"
             data = {"q": query}
@@ -207,8 +233,54 @@ class DeepSearchEngine:
                 except Exception as e2:
                     logger.debug(f"DuckDuckGo Lite search attempt ({cfg}) error: {e2}")
 
+        # 4. Фоллбэк через энциклопедический поиск Wikipedia API
+        if not results:
+            wiki_url = f"https://ru.wikipedia.org/w/api.php?action=opensearch&search={urllib.parse.quote(query)}&limit={limit}&namespace=0&format=json"
+            for cfg in client_configs:
+                try:
+                    async with httpx.AsyncClient(follow_redirects=True, headers=headers, **cfg) as client:
+                        resp = await client.get(wiki_url)
+                        if resp.status_code == 200:
+                            data = resp.json()
+                            if len(data) >= 4:
+                                titles, descs, urls = data[1], data[2], data[3]
+                                for t, d, u in zip(titles, descs, urls):
+                                    if u and u.startswith("http"):
+                                        results.append({
+                                            "title": f"Википедия: {t}",
+                                            "url": u,
+                                            "snippet": d or f"Энциклопедические сведения о {t}",
+                                            "source_type": "web",
+                                            "trust_badge": "🌐 [Открытый Web / Справочник]"
+                                        })
+                                        if len(results) >= limit:
+                                            break
+                    if results:
+                        break
+                except Exception as we:
+                    logger.debug(f"Wikipedia search error ({cfg}): {we}")
+
+        # 5. Фоллбэк: опрос по альтернативным подзапросам декомпозиции
+        if not results and fallback_queries:
+            for alt_q in fallback_queries[:2]:
+                try:
+                    alt_res = await self.search_web(
+                        alt_q,
+                        limit=limit,
+                        timeout=timeout,
+                        use_google_ai=use_google_ai,
+                        llm_router=llm_router,
+                        fallback_queries=None
+                    )
+                    if alt_res:
+                        results.extend(alt_res)
+                        if len(results) >= limit:
+                            break
+                except Exception:
+                    pass
+
         # Обогащаем результаты метаданными Траствиков (CVE, Exploit-DB, LostArmour)
-        return self.trust_manager.enrich_items(results)
+        return self.trust_manager.enrich_items(results[:limit])
 
     @staticmethod
     def generate_darknet_search_terms(query: str) -> List[str]:
@@ -469,6 +541,8 @@ class DeepSearchEngine:
             include_darknet = storage.is_darknet_search_enabled()
 
         use_google_ai = storage.is_google_ai_search_enabled()
+        if llm_router and llm_router.config.gemini.api_key:
+            self.google_grounding.api_key = llm_router.config.gemini.api_key
 
         clean_query = query.strip()
         search_core, target_channels = self.semantic_engine.extract_search_intent(clean_query)
@@ -487,7 +561,13 @@ class DeepSearchEngine:
             specific_entities=specific_entities
         )
         web_query = search_queries[0] if search_queries else search_core
-        web_sources_task = self.search_web(web_query, limit=4, use_google_ai=use_google_ai)
+        web_sources_task = self.search_web(
+            web_query,
+            limit=4,
+            use_google_ai=use_google_ai,
+            llm_router=llm_router,
+            fallback_queries=search_queries[1:3]
+        )
         darknet_task = self.search_darknet(search_core, limit=4) if include_darknet else None
 
         tasks = [user_sources_task, web_sources_task]
@@ -574,21 +654,25 @@ class DeepSearchEngine:
             "Сформируй исчерпывающий, профессиональный OSINT-ответ в HTML-формате Telegram.\n"
             "Строго соблюдай следующую последовательность разделов:\n\n"
             "1. 📱 <b>По данным ваших каналов и мониторинга:</b>\n"
-            "ЕСЛИ В БЛОКЕ КОНТУР 1 УКАЗАНО 'ПОЛНОЕ ОТСУТСТВИЕ СОВПАДЕНИЙ' — напиши СТРОГО одну фразу:\n"
-            "<i>В подключенных Telegram-каналах и лентах публикаций по теме запроса не зафиксировано.</i>\n"
-            "КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО выводить нерелевантные посторонние новости (например, новости про войну или дроны, если вопрос про браузер или IT)!\n"
-            "Если данные ЕСТЬ — распиши только относящиеся к теме факты с указанием каналов и ссылок.\n\n"
+            "Если в ваших каналах есть совпадения — приведи конкретные факты, цитаты и ссылки на каналы (@Voennaja_svodka, @infomil_live, @rybar).\n"
+            "Если в блоке КОНТУР 1 указано 'ПОЛНОЕ ОТСУТСТВИЕ СОВПАДЕНИЙ' — напиши строго одну фразу:\n"
+            "<i>В недавних публикациях подключенных Telegram-каналов прямых упоминаний не зафиксировано.</i>\n"
+            "(Категорически запрещено выводить нерелевантные новости других тем!).\n\n"
             "2. 🌐 <b>По данным внешних авторитетных источников:</b>\n"
             "Что известно из внешнего интернета, мировых СМИ, профильных блогов или официальных сводок. "
             "Приводи факты с активными ссылками на первоисточники <a href=\"URL\">Источник</a>. "
-            "Если источник верифицирован в Траствике (LostArmour, CVE, Exploit-DB), обязательно подчеркни его надежность.\n\n"
+            "Если источник верифицирован в Траствике (LostArmour, CVE, Exploit-DB), обязательно подчеркни его надежность.\n"
+            "ВНИМАНИЕ: Если внешние ссылки в блоке ограничены или запрос широкий, КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО заявлять, что предмета запроса не существует (например, заявлять что у России нет нового оружия)! "
+            "Используй свои глубокие экспертные знания ИИ: подробно изложи известные и актуальные факты по теме запроса "
+            "(конкретные новейшие модели вооружений, дронов, ракетных систем и техники: реактивная «Герань-5», оптоволоконный дрон «Князь Вандал», модернизированный «Ланцет-3», «Охотник С-70», ракета «Орешник», комплексы РЭБ), их ТТХ и особенности боевого применения.\n\n"
             "3. 🧅 <b>По данным мониторинга теневого сегмента (.onion):</b>\n"
             "Что обнаружено в сети Tor (форумы, утечки, теневые посты, зеркала). "
             "Если ресурс имеет пометку ⚠️ [Неверифицированный Onion] — обязательно предупреди пользователя о риске фишинга/скама. "
-            "Если сигналов нет — честно отметь, что в даркнете следов не зафиксировано.\n\n"
+            "Если сигналов нет — честно отметь, что в даркнете утечек по теме не зафиксировано.\n\n"
             "4. 🎯 <b>Аналитическое резюме:</b>\n"
             "Краткий синтез: сходятся ли данные из ваших каналов с внешней картиной, "
-            "какова достоверность, есть ли признаки дезинформации или информационных вбросов.\n\n"
+            "каковы ключевые тенденции развития технологий, оценка боевой эффективности и достоверности сведений. "
+            "Категорически запрещено делать ложные выводы об отсутствии предмета запроса при нехватке сетевых ссылок.\n\n"
             "СТРОЖАЙШИЕ ПРАВИЛА ВЕРСТКИ:\n"
             "- Используй ТОЛЬКО разрешенный Telegram HTML (<b>, <i>, <code>, <blockquote>, <a href=\"...\">).\n"
             "- КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО использовать Markdown: никаких **звездочек**, никаких ```кавычек```, никаких знаков > для цитат!\n"

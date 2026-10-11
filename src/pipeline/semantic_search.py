@@ -58,25 +58,25 @@ class SemanticSearchEngine:
         -> target_channels: ['voennaja_svodka', 'infomil_live']
         """
         raw = query.strip()
-        channel_map = {
-            "военн": "voennaja_svodka",
-            "сводк": "voennaja_svodka",
-            "осведомител": "infomil_live",
-            "инфомил": "infomil_live",
-            "медведев": "medvedev_telegram",
-            "рыбар": "rybar",
-            "росс": "ross_name",
-            "дядя батя": "dyadyabatya0",
-            "хакер": "xakep_ru",
-            "хабр": "habr_com",
-            "разраб": "proglib",
-            "царьград": "rostov_tsargrad",
-        }
+        channel_rules = [
+            (r'(?:@voennaja_svodka|военн\w*\s+сводк\w*|в\s+военной\s+сводке)', "voennaja_svodka"),
+            (r'(?:@infomil_live|осведомител\w*|инфомил\w*)', "infomil_live"),
+            (r'(?:@medvedev_telegram|медведев\w*|дмитри[яе]\s+медведев\w*)', "medvedev_telegram"),
+            (r'(?:@rybar|рыбар\w*)', "rybar"),
+            (r'(?:@ross_name|ростовск\w*\s+связн\w*|ростов\s+главн\w*|канал\w*\s+росс\b)', "ross_name"),
+            (r'(?:@dyadyabatya0|дяд[яе]\s+бат[яе]\w*)', "dyadyabatya0"),
+            (r'(?:@xakep_ru|журнал\w*\s+хакер|сайт\w*\s+хакер|в\s+хакере)', "xakep_ru"),
+            (r'(?:@habr_com|на\s+хабре|в\s+хабре)', "habr_com"),
+            (r'(?:@proglib|библиотек\w*\s+программист\w*)', "proglib"),
+            (r'(?:@rostov_tsargrad|царьград\w*)', "rostov_tsargrad"),
+            (r'(?:@rian_ru|риа\s+новост\w*|\bриа\b)', "rian_ru"),
+            (r'(?:@tass_agency|\bтасс\b)', "tass_agency"),
+            (r'(?:@kommersant|коммерсант\w*)', "kommersant"),
+        ]
         targets = []
-        q_low = raw.lower()
-        for k, v in channel_map.items():
-            if k in q_low and v not in targets:
-                targets.append(v)
+        for pat, ch in channel_rules:
+            if re.search(pat, raw, re.IGNORECASE) and ch not in targets:
+                targets.append(ch)
 
         # Удаление вводных фраз ('в каком-то посте в канале X вроде было про то, что...')
         lead_patterns = [
@@ -101,7 +101,14 @@ class SemanticSearchEngine:
 
         return cleaned or raw, targets
 
-    async def search_posts(self, query: str, candidates: List[Dict[str, Any]], limit: int = 5, target_channels: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+    async def search_posts(
+        self,
+        query: str,
+        candidates: List[Dict[str, Any]],
+        limit: int = 5,
+        target_channels: Optional[List[str]] = None,
+        specific_entities: Optional[List[str]] = None
+    ) -> List[Dict[str, Any]]:
         """
         Ищет публикации по смысловому описанию.
         Если доступен векторный сервер LM Studio — ранжирует по косинусному сходству.
@@ -143,6 +150,14 @@ class SemanticSearchEngine:
                 continue
             stem = re.sub(r'(?:овали|евали|ован|еван|али|яли|или|ила|ала|ели|ать|ять|ить|еть|ского|ских|ские|ской|ская|ское|ск|ого|его|ому|ему|ыми|ими|ами|ями|ых|их|ах|ях|ия|ие|ые|ое|ее|ом|ем|ой|ей|ам|ям|а|я|о|е|у|ю|ы|и)$', '', w)
             stems.append(stem if len(stem) >= 3 else w)
+
+        # Добавляем стеммы из конкретных сущностей декомпозиции (Герань-5, Ланцет, Князь Вандал, Охотник)
+        if specific_entities:
+            for ent in specific_entities:
+                for ew in re.findall(r'[а-яa-z0-9_-]+', ent.lower()):
+                    if len(ew) >= 3 and ew not in stop_words:
+                        e_stem = re.sub(r'(?:овали|евали|ован|еван|али|яли|или|ила|ала|ели|ать|ять|ить|еть|ского|ских|ские|ской|ская|ское|ск|ого|его|ому|ему|ыми|ими|ами|ями|ых|их|ах|ях|ия|ие|ые|ое|ее|ом|ем|ой|ей|ам|ям|а|я|о|е|у|ю|ы|и)$', '', ew)
+                        stems.append(e_stem if len(e_stem) >= 3 else ew)
         stems = list(dict.fromkeys(stems))
 
         scored = []
@@ -157,13 +172,22 @@ class SemanticSearchEngine:
                 if st in corpus:
                     matched_stems += 1
 
-            # КРИТИЧНО: пост ОБЯЗАН иметь совпадение по теме запроса (хотя бы 1 совпадение по ключевому слову)!
-            # Принадлежность к каналу даёт бонус, но НЕ даёт права пропускать оффтоп!
-            if matched_stems >= 1:
+            # Дополнительный бонус за точное совпадение сущностей (например, 'Герань-5' или 'Князь Вандал')
+            entity_match = False
+            if specific_entities:
+                for ent in specific_entities:
+                    if ent.lower() in corpus:
+                        entity_match = True
+                        break
+
+            # КРИТИЧНО: пост ОБЯЗАН иметь совпадение по теме запроса или найденной сущности
+            if matched_stems >= 1 or entity_match:
                 score = matched_stems * 25
+                if entity_match:
+                    score += 60
                 if is_target_ch:
                     score += 40
-                if (matched_stems >= 2) or (is_target_ch and matched_stems >= 1) or (len(stems) <= 2 and matched_stems >= 1):
+                if (matched_stems >= 2) or entity_match or (is_target_ch and matched_stems >= 1) or (len(stems) <= 2 and matched_stems >= 1):
                     scored.append((score, it))
 
         scored.sort(key=lambda x: x[0], reverse=True)

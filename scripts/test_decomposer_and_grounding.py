@@ -134,6 +134,24 @@ async def test_all():
     assert results[0]["channel"] == "voennaja_svodka"
     print(f"✓ User source matching specific entity 'Герань-5' prioritized: [{results[0]['channel']}] {results[0]['title']}")
 
+    print("\n=== TEST 6: Broad query 'новое оружие России' does NOT lock into ross_name channel ===")
+    from src.pipeline.semantic_search import SemanticSearchEngine
+    sem_engine = SemanticSearchEngine()
+    cq, tg_channels = sem_engine.extract_search_intent("новое оружие России")
+    assert tg_channels == [], f"Should NOT lock to any channel, got {tg_channels}"
+    print(f"✓ Channel locking avoided: clean_q='{cq}', channels={tg_channels}")
+
+    decomp = deep_engine.decomposer.fallback_decompose("новое оружие России")
+    broad_results = await deep_engine.search_user_sources(
+        query="новое оружие России",
+        storage=storage,
+        limit=5,
+        specific_entities=decomp.get("specific_entities")
+    )
+    assert len(broad_results) > 0, "Should find posts matching decomposed military entities"
+    assert broad_results[0]["channel"] == "voennaja_svodka"
+    print(f"✓ Broad query successfully retrieved: [{broad_results[0]['channel']}] {broad_results[0]['title']}")
+
     print("\n=== ALL DECOMPOSER & GROUNDING TESTS PASSED ===")
 
 if __name__ == "__main__":

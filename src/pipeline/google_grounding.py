@@ -1,9 +1,11 @@
 import logging
 import os
+import urllib.parse
 from typing import Dict, Any, List, Optional
 import httpx
 
 from src.pipeline.trust_manager import TrustManager
+from src.config import load_app_config
 
 logger = logging.getLogger(__name__)
 
@@ -15,14 +17,19 @@ class GoogleSearchGroundingEngine:
     """
 
     def __init__(self, api_key: Optional[str] = None, proxy: Optional[str] = None):
-        self.api_key = api_key or os.getenv("GEMINI_API_KEY")
+        cfg = None
+        try:
+            cfg = load_app_config()
+        except Exception:
+            pass
+        self.api_key = api_key or (cfg.llm.gemini.api_key if cfg and cfg.llm and cfg.llm.gemini else None) or os.getenv("GEMINI_API_KEY")
         self.proxy = proxy or os.getenv("WEB_SEARCH_PROXY") or os.getenv("HTTP_PROXY") or "http://127.0.0.1:10809"
-        self.models_pool = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+        self.models_pool = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.5-flash"]
         self.trust_manager = TrustManager()
 
     def is_available(self) -> bool:
         """Проверяет, задан ли API-ключ Gemini"""
-        return bool(self.api_key and len(self.api_key) > 10 and not self.api_key.startswith("AIzaSy_placeholder"))
+        return bool(self.api_key and len(self.api_key) > 10 and not self.api_key.startswith("AIzaSy_placeholder") and not self.api_key.startswith("AIzaSy..."))
 
     def _parse_gemini_response(self, data: Dict[str, Any], query: str) -> List[Dict[str, Any]]:
         """Извлекает и верифицирует источники из ответа Gemini Grounding"""
@@ -109,6 +116,33 @@ class GoogleSearchGroundingEngine:
                         grounding_meta = cand0.get("groundingMetadata", {})
                         web_queries = grounding_meta.get("webSearchQueries", [])
                         sources = self._parse_gemini_response(data, query)
+
+                        # Если Google Grounding ответил текстом, но список chunks пуст —
+                        # извлекаем ссылки из текста ответа или формируем прямую выжимку Google Grounding!
+                        if not sources and text:
+                            url_matches = re.findall(r'https?://[^\s\)\]>"\']+', text)
+                            seen_u = set()
+                            for u in url_matches:
+                                if u not in seen_u:
+                                    seen_u.add(u)
+                                    trust_info = self.trust_manager.verify_url(u)
+                                    sources.append({
+                                        "title": f"Источник: {urllib.parse.urlparse(u).netloc}",
+                                        "url": u,
+                                        "snippet": f"Материал исследования Google: {query}",
+                                        "source_type": "google_search_grounding",
+                                        "trust_badge": trust_info.get("badge", "🌐 [Google Режим ИИ]"),
+                                        "trust_score": trust_info.get("trust_score", 50)
+                                    })
+                            if not sources:
+                                sources.append({
+                                    "title": f"Google AI Режим Поиска: «{query[:50]}»",
+                                    "url": f"https://www.google.com/search?q={urllib.parse.quote(query)}",
+                                    "snippet": text[:350],
+                                    "source_type": "google_search_grounding",
+                                    "trust_badge": "🌐 [Google Режим ИИ]",
+                                    "trust_score": 75
+                                })
 
                         logger.info(f"✨ [Google Режим ИИ] Успешно получено {len(sources)} источников по теме «{query[:40]}» ({model})")
                         return {
