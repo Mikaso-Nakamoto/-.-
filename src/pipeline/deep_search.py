@@ -176,53 +176,119 @@ class DeepSearchEngine:
         # Обогащаем результаты метаданными Траствиков (CVE, Exploit-DB, LostArmour)
         return self.trust_manager.enrich_items(results)
 
+    @staticmethod
+    def generate_darknet_search_terms(query: str) -> List[str]:
+        """
+        Генерирует специализированные поисковые термы для сети Tor (Ahmia):
+        1. Очищает от русских разговорных стоп-слов ('кто такой', 'что такое', 'расскажи про').
+        2. Извлекает латинские термины, аббревиатуры (0-day, CVE, RCE, Linux, SSH, Chrome, Python).
+        3. Подбирает английские эквиваленты ключевых понятий для охвата англоязычных onion-ресурсов.
+        """
+        terms = []
+        clean_q = query.strip()
+        clean_without_stops = re.sub(
+            r'(?i)\b(?:кто такой|кто такая|что такое|расскажи про|найди мне|найди|поиск|в браузере|в системе|в сети|информация о|информация про)\b',
+            '',
+            clean_q
+        ).strip()
+        clean_without_stops = re.sub(r'\s{2,}', ' ', clean_without_stops)
+
+        latin_words = re.findall(r'[a-zA-Z0-9_-]+', clean_q)
+        if len(latin_words) >= 1:
+            terms.append(" ".join(latin_words))
+
+        trans_map = {
+            "гугл": "google chrome",
+            "хром": "chrome",
+            "браузер": "browser",
+            "уязвимост": "vulnerability exploit 0-day",
+            "эксплойт": "exploit 0-day",
+            "владимир путин": "Vladimir Putin",
+            "путин": "Putin",
+            "утечк": "leak database dump",
+            "баз данных": "database breach",
+            "парол": "passwords credentials dump",
+            "хакер": "hacker forum",
+        }
+        q_lower = clean_q.lower()
+        translated_tokens = []
+        for ru_stem, en_eq in trans_map.items():
+            if ru_stem in q_lower:
+                translated_tokens.append(en_eq)
+
+        if translated_tokens:
+            terms.append(" ".join(dict.fromkeys(translated_tokens)))
+
+        if clean_without_stops and clean_without_stops not in terms:
+            terms.insert(0, clean_without_stops)
+        elif clean_q not in terms:
+            terms.insert(0, clean_q)
+
+        return list(dict.fromkeys([t for t in terms if t.strip()]))[:3]
+
     async def search_darknet(self, query: str, limit: int = 4, timeout: float = 8.0) -> List[Dict[str, Any]]:
         """
         Контур 3: Поиск в скрытом сегменте сети Tor (.onion / Darknet).
         Использует поисковую систему Ahmia (индексатор ресурсов .onion):
         - Сначала пробует через локальный Tor SOCKS5-прокси (socks5://127.0.0.1:9050).
         - Если Tor-демон не поднят, опрашивает безопасный шлюз ahmia.fi через Xray-прокси.
+        - Использует умную трансляцию запросов на английский для англоязычного сегмента Tor.
         """
         results: List[Dict[str, Any]] = []
+        search_terms = self.generate_darknet_search_terms(query)
 
-        # 1. Попытка через Tor SOCKS5 прокси (если поднят демон Tor на хосте или в Docker)
-        socks_tried = False
-        if self.tor_socks_proxy:
-            try:
-                onion_search_url = f"https://ahmia.fi/search/?q={urllib.parse.quote(query)}"
-                async with httpx.AsyncClient(proxy=self.tor_socks_proxy, timeout=2.5, headers={"User-Agent": USER_AGENT}) as client:
-                    resp = await client.get(onion_search_url)
-                    if resp.status_code == 200 and resp.text:
-                        results = self._parse_ahmia_results(resp.text, limit=limit)
-                        socks_tried = True
-            except Exception as e:
-                logger.debug(f"Tor SOCKS5 proxy check/fetch ({self.tor_socks_proxy}): {e}")
-
-        # 2. Если через SOCKS5 не вышло — опрашиваем индекс Ahmia через Xray HTTP-прокси (или напрямую)
-        if not results and not socks_tried:
-            ahmia_url = f"https://ahmia.fi/search/?q={urllib.parse.quote(query)}"
-            headers = {
-                "User-Agent": USER_AGENT,
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            }
-            client_configs = []
-            if self.xray_http_proxy:
-                client_configs.append({"proxy": self.xray_http_proxy, "timeout": timeout})
-            client_configs.append({"timeout": timeout})
-
-            for cfg in client_configs:
+        for term in search_terms:
+            # 1. Попытка через Tor SOCKS5 прокси
+            if self.tor_socks_proxy:
                 try:
-                    async with httpx.AsyncClient(follow_redirects=True, headers=headers, **cfg) as client:
-                        resp = await client.get(ahmia_url)
+                    onion_search_url = f"https://ahmia.fi/search/?q={urllib.parse.quote(term)}"
+                    async with httpx.AsyncClient(proxy=self.tor_socks_proxy, timeout=2.5, headers={"User-Agent": USER_AGENT}) as client:
+                        resp = await client.get(onion_search_url)
                         if resp.status_code == 200 and resp.text:
-                            results = self._parse_ahmia_results(resp.text, limit=limit)
-                            if results:
+                            parsed = self._parse_ahmia_results(resp.text, limit=limit)
+                            if parsed:
+                                results.extend(parsed)
                                 break
                 except Exception as e:
-                    logger.debug(f"Direct Ahmia .onion search error ({cfg}): {e}")
+                    logger.debug(f"Tor SOCKS5 proxy check/fetch ({term}): {e}")
+
+            # 2. Если через SOCKS5 не вышло или 0 находок — опрашиваем индекс Ahmia через Xray HTTP-прокси
+            if not results:
+                ahmia_url = f"https://ahmia.fi/search/?q={urllib.parse.quote(term)}"
+                headers = {
+                    "User-Agent": USER_AGENT,
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                }
+                client_configs = []
+                if self.xray_http_proxy:
+                    client_configs.append({"proxy": self.xray_http_proxy, "timeout": timeout})
+                client_configs.append({"timeout": timeout})
+
+                for cfg in client_configs:
+                    try:
+                        async with httpx.AsyncClient(follow_redirects=True, headers=headers, **cfg) as client:
+                            resp = await client.get(ahmia_url)
+                            if resp.status_code == 200 and resp.text:
+                                parsed = self._parse_ahmia_results(resp.text, limit=limit)
+                                if parsed:
+                                    results.extend(parsed)
+                                    break
+                    except Exception as e:
+                        logger.debug(f"Direct Ahmia .onion search error ({cfg}): {e}")
+                if results:
+                    break
+
+        # Дедупликация по url
+        seen = set()
+        deduped = []
+        for it in results:
+            u = it.get("url")
+            if u and u not in seen:
+                seen.add(u)
+                deduped.append(it)
 
         # Обогащаем результаты проверки по Траствикам (OnionTree, Daunt, The Hidden Wiki)
-        return self.trust_manager.enrich_items(results)
+        return self.trust_manager.enrich_items(deduped[:limit])
 
     def _parse_ahmia_results(self, html_text: str, limit: int = 4) -> List[Dict[str, Any]]:
         """Парсинг результатов поиска по .onion страницам из разметки Ahmia"""
@@ -323,7 +389,7 @@ class DeepSearchEngine:
                 lines.append(f"{i}. [{ch}] ({pub}) {tit}\nТекст: {cnt}\nСсылка: {url}")
             user_sources_text = "\n\n".join(lines)
         else:
-            user_sources_text = "Прямых упоминаний в подключенных каналах и лентах не найдено (база просмотрена)."
+            user_sources_text = "ПОЛНОЕ ОТСУТСТВИЕ СОВПАДЕНИЙ: В подключенных каналах и лентах публикаций по теме запроса не найдено (база проверена)."
 
         web_sources_text = ""
         if web_sources:
@@ -368,31 +434,25 @@ class DeepSearchEngine:
             "Сформируй исчерпывающий, профессиональный OSINT-ответ в HTML-формате Telegram.\n"
             "Строго соблюдай следующую последовательность разделов:\n\n"
             "1. 📱 <b>По данным ваших каналов и мониторинга:</b>\n"
-            "Сначала подробно распиши всё, что зафиксировано в собственных источниках пользователя. "
-            "Выделяй важные формулировки и цитаты в <blockquote>...</blockquote>. "
-            "Указывай названия каналов и оформляй ссылки на них: <a href=\"URL\">Название источника</a>. "
-            "Если в собственных источниках ничего не найдено — прямо и кратко укажи это.\n\n"
+            "ЕСЛИ В БЛОКЕ КОНТУР 1 УКАЗАНО 'ПОЛНОЕ ОТСУТСТВИЕ СОВПАДЕНИЙ' — напиши СТРОГО одну фразу:\n"
+            "<i>В подключенных Telegram-каналах и лентах публикаций по теме запроса не зафиксировано.</i>\n"
+            "КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО выводить нерелевантные посторонние новости (например, новости про войну или дроны, если вопрос про браузер или IT)!\n"
+            "Если данные ЕСТЬ — распиши только относящиеся к теме факты с указанием каналов и ссылок.\n\n"
             "2. 🌐 <b>По данным внешних авторитетных источников:</b>\n"
             "Что известно из внешнего интернета, мировых СМИ, профильных блогов или официальных сводок. "
             "Приводи факты с активными ссылками на первоисточники <a href=\"URL\">Источник</a>. "
             "Если источник верифицирован в Траствике (LostArmour, CVE, Exploit-DB), обязательно подчеркни его надежность.\n\n"
-        )
-
-        if include_darknet:
-            ai_prompt += (
-                "3. 🧅 <b>По данным мониторинга теневого сегмента (.onion):</b>\n"
-                "Что обнаружено в сети Tor (форумы, утечки, теневые посты, зеркала). "
-                "Если ресурс имеет пометку ⚠️ [Неверифицированный Onion] — обязательно предупреди пользователя о риске фишинга/скама. "
-                "Если сигналов нет — честно отметь, что в даркнете следов не зафиксировано.\n\n"
-            )
-
-        ai_prompt += (
+            "3. 🧅 <b>По данным мониторинга теневого сегмента (.onion):</b>\n"
+            "Что обнаружено в сети Tor (форумы, утечки, теневые посты, зеркала). "
+            "Если ресурс имеет пометку ⚠️ [Неверифицированный Onion] — обязательно предупреди пользователя о риске фишинга/скама. "
+            "Если сигналов нет — честно отметь, что в даркнете следов не зафиксировано.\n\n"
             "4. 🎯 <b>Аналитическое резюме:</b>\n"
             "Краткий синтез: сходятся ли данные из ваших каналов с внешней картиной, "
             "какова достоверность, есть ли признаки дезинформации или информационных вбросов.\n\n"
-            "ВАЖНО:\n"
+            "СТРОЖАЙШИЕ ПРАВИЛА ВЕРСТКИ:\n"
             "- Используй ТОЛЬКО разрешенный Telegram HTML (<b>, <i>, <code>, <blockquote>, <a href=\"...\">).\n"
-            "- НИКОГДА не используй Markdown (никаких **звездочек** или ```тройных кавычек```).\n"
+            "- КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО использовать Markdown: никаких **звездочек**, никаких ```кавычек```, никаких знаков > для цитат!\n"
+            "- КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО оборачивать пункты списков в цитаты целиком! Оформляй пункты списком: 1. <b>Заголовок</b>... А тег <blockquote> используй ТОЛЬКО для конкретных коротких цитат спикеров.\n"
             "- Категорически запрещено использовать шаблоны-заглушки вида '— @канал' или '[@канал](ссылка)'.\n"
             "- Ответ должен быть содержательным, плотным и фактологическим, без пустой воды."
         )

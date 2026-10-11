@@ -66,9 +66,9 @@ class SemanticSearchEngine:
                 it_emb = await self.get_embedding(text_sample)
                 if it_emb:
                     sim = self.cosine_similarity(query_emb, it_emb)
-                    scored.append((sim, it))
-                else:
-                    scored.append((0.0, it))
+                    # Порог релевантности: отсекаем несвязанный оффтоп (порог 0.40)
+                    if sim >= 0.40:
+                        scored.append((sim, it))
             scored.sort(key=lambda x: x[0], reverse=True)
             return [it for _, it in scored[:limit]]
 
@@ -90,7 +90,8 @@ class SemanticSearchEngine:
             for st in stems:
                 if st in corpus:
                     score += 25
-            if score > 0:
+            # Требуем хотя бы 2 совпадения по стеммам или 1 сильное совпадение, чтобы не пускать оффтоп
+            if score >= 50 or (len(stems) == 1 and score >= 25):
                 scored.append((score, it))
 
         scored.sort(key=lambda x: x[0], reverse=True)
