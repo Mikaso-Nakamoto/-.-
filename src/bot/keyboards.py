@@ -3,15 +3,9 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 from src.llm.router import POPULAR_MODELS
 
 def get_main_menu_keyboard(chat_mode: bool = False, web_app_url: Optional[str] = None) -> InlineKeyboardMarkup:
-    chat_btn = (
-        InlineKeyboardButton(text="🔴 Завершить диалог", callback_data="btn_chat_stop")
-        if chat_mode
-        else InlineKeyboardButton(text="💬 Задать вопрос / Чат", callback_data="btn_chat_start")
-    )
-
     first_row = [
         InlineKeyboardButton(text="⚡️ Аналитическая сводка", callback_data="btn_run_digest"),
-        chat_btn
+        InlineKeyboardButton(text="🔍 Поиск и OSINT", callback_data="btn_search_menu")
     ]
 
     second_row = [
@@ -20,8 +14,8 @@ def get_main_menu_keyboard(chat_mode: bool = False, web_app_url: Optional[str] =
     ]
 
     third_row = [
-        InlineKeyboardButton(text="🔄 Обновить ленту", callback_data="btn_refresh_now"),
-        InlineKeyboardButton(text="📊 Статус контура", callback_data="btn_status")
+        InlineKeyboardButton(text="📊 Статус контура", callback_data="btn_status"),
+        InlineKeyboardButton(text="🔄 Обновить ленту", callback_data="btn_refresh_now")
     ]
 
     rows = [first_row, second_row, third_row]
@@ -30,18 +24,13 @@ def get_main_menu_keyboard(chat_mode: bool = False, web_app_url: Optional[str] =
         clean_url = str(web_app_url).strip()
         if clean_url.lower().startswith("https://"):
             rows.append([InlineKeyboardButton(text="📱 Открыть терминал (Web)", web_app=WebAppInfo(url=clean_url))])
-        elif clean_url.lower().startswith("http://"):
-            rows.append([InlineKeyboardButton(text="🌐 Веб-панель (LAN)", url=clean_url)])
 
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def get_chat_control_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="🔴 Завершить диалог", callback_data="btn_chat_stop"),
-            InlineKeyboardButton(text="🧹 Очистить память диалога", callback_data="btn_chat_clear")
-        ],
-        [
+            InlineKeyboardButton(text="🧹 Очистить память диалога", callback_data="btn_chat_clear"),
             InlineKeyboardButton(text="🏠 Главное меню", callback_data="btn_menu")
         ]
     ])
@@ -60,9 +49,6 @@ def get_search_result_keyboard(is_darknet_enabled: bool) -> InlineKeyboardMarkup
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text=darknet_label, callback_data=cb_data),
-            InlineKeyboardButton(text="💬 Обсудить в чате", callback_data="btn_chat_start")
-        ],
-        [
             InlineKeyboardButton(text="🏠 Главное меню", callback_data="btn_menu")
         ]
     ])

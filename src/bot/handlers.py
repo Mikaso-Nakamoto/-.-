@@ -342,31 +342,21 @@ def split_telegram_html(text: str, max_chunk: int = 3800) -> List[str]:
                 logger.error(f"Failed to send chunk {idx}: {e}")
 
 def build_snowden_menu_text(
-    local_status: str,
-    active_prov: str,
-    current_model: str,
-    chat_active: bool,
-    is_test_mode: bool,
-    tz_name: str,
-    next_run: str,
-    tg_count: int,
-    rss_count: int,
+    local_status: str = "",
+    active_prov: str = "",
+    current_model: str = "",
+    chat_active: bool = True,
+    is_test_mode: bool = False,
+    tz_name: str = "",
+    next_run: str = "",
+    tg_count: int = 0,
+    rss_count: int = 0,
     darknet_on: bool = False
 ) -> str:
-    test_note = " <i>(🧪 тестовый режим)</i>" if is_test_mode else ""
-    darknet_status = "🟢 Включен (/darknet off)" if darknet_on else "⚪️ Выключен (/darknet on)"
     return (
         "🕶 <b>Аналитический агент Сноуден на связи.</b>\n"
-        "<i>Фильтрую инфошум, собираю проверенную фактуру со всех каналов и держу руку на пульсе.</i>\n\n"
-        "━━━━━━━━━━━━━━━━━━━━━\n"
-        f"💻 <b>Контур:</b> Ноутбук-сервер 24/7 (🟢 В строю) • ПК ({local_status})\n"
-        f"🧠 <b>Ядро аналитики:</b> <code>{active_prov.upper()}</code> • <code>{current_model}</code>\n"
-        f"📡 <b>Источники:</b> {tg_count} Telegram-каналов • {rss_count} RSS-потоков{test_note}\n"
-        f"⏰ <b>Утренняя сводка:</b> <code>08:50 ({tz_name})</code> • следующая: <code>{next_run}</code>\n"
-        f"💬 <b>Диалог в чате:</b> {'🟢 Включен (пиши прямо сюда)' if chat_active else '⚪️ Выключен (вход через /chat)'}\n"
-        f"🧅 <b>Поиск в Darknet (.onion):</b> {darknet_status}\n"
-        "━━━━━━━━━━━━━━━━━━━━━\n\n"
-        "Выбирай нужный раздел в меню ниже или пользуйся списком команд <b>[/]</b>:"
+        "<i>Автономный мониторинг каналов, глубокая OSINT-разведка и аналитика с ИИ.</i>\n\n"
+        "💡 <i>Вы можете писать любой вопрос или задачу прямо сюда — я сам определю нужный инструмент (поиск публикаций в каналах, разведка в Сети и Darknet или аналитическая сводка).</i>"
     )
 
     # --------------------------------------------------------------------------
@@ -872,6 +862,22 @@ def build_snowden_menu_text(
             f"• Выключить: <code>/darknet off</code>"
         )
         await safe_edit_text(call, text, get_darknet_keyboard(enable))
+
+    @r.callback_query(F.data == "btn_search_menu")
+    async def cb_search_menu(call: CallbackQuery):
+        is_darknet = storage.is_darknet_search_enabled()
+        dark_status = "🟢 <b>ВКЛЮЧЕН</b>" if is_darknet else "⚪️ <b>ВЫКЛЮЧЕН</b>"
+        text = (
+            "🔍 <b>Центр поиска и OSINT-разведки («Агент Сноуден»):</b>\n\n"
+            "<b>Сноуден одновременно опрашивает 3 контура:</b>\n"
+            "1. 📱 <b>Ваши источники</b> — подключенные Telegram-каналы и RSS.\n"
+            "2. 🌐 <b>Внешний Web</b> — мировые СМИ, профильные порталы, базы эксплойтов.\n"
+            f"3. 🧅 <b>Теневой сегмент (.onion / Darknet)</b> — {dark_status}\n\n"
+            "<b>Как пользоваться:</b>\n"
+            "• Просто напишите в чат любой вопрос или тему (ИИ сам выполнит поиск и подготовит отчет).\n"
+            "• Либо используйте команды <code>/search &lt;тема&gt;</code> или <code>/find &lt;пост&gt;</code>."
+        )
+        await safe_edit_text(call, text, get_darknet_keyboard(is_darknet))
 
     # --------------------------------------------------------------------------
     # Быстрый поиск постов в архиве каналов: /find <текст>
@@ -1524,15 +1530,6 @@ def build_snowden_menu_text(
                 f"в файле <code>.env</code> на сервере и перезапустите контейнер.",
                 parse_mode="HTML"
             )
-            return
-
-        # Если режим чата выключен — подсказываем, как включить
-        if not storage.is_chat_mode_active():
-            text = (
-                f"💡 *Режим диалога сейчас выключен.*\n\n"
-                f"Чтобы задать вопрос ИИ или обсудить свежие новости, нажмите кнопку ниже или введите /chat."
-            )
-            await send_safe_reply(msg, text, reply_markup=get_main_menu_keyboard(chat_mode=False, web_app_url=get_web_app_url()))
             return
 
         await msg.bot.send_chat_action(msg.chat.id, "typing")

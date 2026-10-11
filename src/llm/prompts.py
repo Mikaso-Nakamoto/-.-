@@ -91,6 +91,10 @@ def markdown_to_telegram_html(text: str) -> str:
         q_text = "\n".join(q_lines).strip()
         if not q_text:
             return ""
+        # Если блок содержит заголовки разделов (1. 📱, 2. 🌐, 3. 🧅, 4. 🎯) или длинный текст > 400 символов,
+        # НЕ оборачиваем его в цитату целиком, а возвращаем обычным текстом, чтобы избежать цитатной рамки вокруг раздела
+        if re.search(r'(?i)(?:[1-4]\.\s*(?:📱|🌐|🧅|🎯|По\s+данным)|Аналитическое\s+резюме)', q_text) or len(q_text) > 400:
+            return q_text
         # 1. Обрабатываем ссылки внутри цитаты [текст](url)
         q_text = re.sub(r'\[([^\]]+)\]\((https?://[^\)]+)\)', r'<a href="\2">\1</a>', q_text)
         # 2. Обрабатываем жирный шрифт **текст**
@@ -142,7 +146,14 @@ def markdown_to_telegram_html(text: str) -> str:
     for i, block in enumerate(code_blocks):
         text = text.replace(f"XZXCODEBLOCK{i}XZX", block)
 
-    # 13. Удаляем пустые цитаты и лишние пустые строки
+    # 13. Распаковываем цитаты, если модель ошибочно обернула целый раздел в blockquote
+    def unwrap_bad_blockquote(m):
+        inner = m.group(1)
+        if re.search(r'(?i)(?:[1-4]\.\s*(?:📱|🌐|🧅|🎯|По\s+данным)|Аналитическое\s+резюме)', inner) or len(inner) > 500:
+            return inner
+        return m.group(0)
+
+    text = re.sub(r'<blockquote[^>]*>(.*?)</blockquote>', unwrap_bad_blockquote, text, flags=re.DOTALL | re.IGNORECASE)
     text = re.sub(r'<blockquote[^>]*>\s*</blockquote>', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\n{3,}', '\n\n', text)
 

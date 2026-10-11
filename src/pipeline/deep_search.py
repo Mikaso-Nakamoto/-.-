@@ -62,6 +62,9 @@ class DeepSearchEngine:
 
             # Семантическое ранжирование с учетом целевых каналов
             ranked = await self.semantic_engine.search_posts(clean_q, combined_candidates, limit=limit, target_channels=targets)
+            if not ranked and search_items:
+                ranked = search_items[:limit]
+
             results = []
             for it in ranked:
                 ch = it.get("channel", "Собственный источник")
@@ -183,14 +186,14 @@ class DeepSearchEngine:
     def generate_darknet_search_terms(query: str) -> List[str]:
         """
         Генерирует специализированные поисковые термы для сети Tor (Ahmia):
-        1. Очищает от русских разговорных стоп-слов ('кто такой', 'что такое', 'расскажи про').
+        1. Очищает от русских разговорных стоп-слов ('кто такой', 'что такое', 'расскажи про', 'за последний месяц').
         2. Извлекает латинские термины, аббревиатуры (0-day, CVE, RCE, Linux, SSH, Chrome, Python).
         3. Подбирает английские эквиваленты ключевых понятий для охвата англоязычных onion-ресурсов.
         """
         terms = []
         clean_q = query.strip()
         clean_without_stops = re.sub(
-            r'(?i)\b(?:кто такой|кто такая|что такое|расскажи про|найди мне|найди|поиск|в браузере|в системе|в сети|информация о|информация про)\b',
+            r'(?i)\b(?:кто такой|кто такая|что такое|расскажи про|найди мне|найди|поиск|в браузере|в системе|в сети|информация о|информация про|сведения о|заявление|заявления|относительно|по поводу|за последний месяц|за последнюю неделю|за последнее время)\b',
             '',
             clean_q
         ).strip()
@@ -206,21 +209,38 @@ class DeepSearchEngine:
             "браузер": "browser",
             "уязвимост": "vulnerability exploit 0-day",
             "эксплойт": "exploit 0-day",
-            "владимир путин": "Vladimir Putin",
-            "путин": "Putin",
+            "взлом": "hack breach",
+            "хакер": "hacker forum",
             "утечк": "leak database dump",
             "баз данных": "database breach",
             "парол": "passwords credentials dump",
-            "хакер": "hacker forum",
+            "владимир путин": "Vladimir Putin",
+            "путин": "Putin",
+            "трамп": "Trump",
+            "иран": "Iran",
+            "войн": "war",
+            "украин": "Ukraine",
+            "войск": "Russian army",
+            "продвижен": "offensive advance",
+            "сво": "Ukraine war",
+            "дрон": "drone uav",
+            "бпла": "uav drone",
+            "оружи": "weapons",
+            "росси": "Russia",
+            "сша": "USA",
+            "китай": "China",
+            "санкци": "sanctions",
         }
         q_lower = clean_q.lower()
         translated_tokens = []
         for ru_stem, en_eq in trans_map.items():
             if ru_stem in q_lower:
-                translated_tokens.append(en_eq)
+                for tok in en_eq.split():
+                    if tok not in translated_tokens:
+                        translated_tokens.append(tok)
 
         if translated_tokens:
-            terms.append(" ".join(dict.fromkeys(translated_tokens)))
+            terms.append(" ".join(translated_tokens[:4]))
 
         if clean_without_stops and clean_without_stops not in terms:
             terms.insert(0, clean_without_stops)
@@ -229,7 +249,7 @@ class DeepSearchEngine:
 
         return list(dict.fromkeys([t for t in terms if t.strip()]))[:3]
 
-    async def _search_duckduckgo_onion(self, term: str, limit: int = 4, timeout: float = 8.0) -> List[Dict[str, Any]]:
+    async def _search_duckduckgo_onion(self, term: str, limit: int = 4, timeout: float = 12.0) -> List[Dict[str, Any]]:
         """Поиск ресурсов теневого сегмента .onion через поисковый индекс DuckDuckGo"""
         results = []
         queries_to_try = [f"{term} site:onion", f"\"{term}\" .onion", f"{term} .onion"]
@@ -278,33 +298,35 @@ class DeepSearchEngine:
                 break
         return results
 
-    async def search_darknet(self, query: str, limit: int = 4, timeout: float = 8.0) -> List[Dict[str, Any]]:
+    async def search_darknet(self, query: str, limit: int = 4, timeout: float = 45.0) -> List[Dict[str, Any]]:
         """
         Контур 3: Поиск в скрытом сегменте сети Tor (.onion / Darknet).
         Использует поисковую систему Ahmia (индексатор ресурсов .onion):
-        - Сначала пробует через локальный Tor SOCKS5-прокси нативный .onion адрес Ahmia без Cloudflare.
+        - Сначала пробует через локальный Tor SOCKS5-прокси нативный .onion адрес Ahmia без Cloudflare (таймаут 45s).
         - Затем опрашивает безопасный шлюз ahmia.fi через Xray HTTP-прокси.
         - При блокировках или нуле находок опрашивает .onion индекс DuckDuckGo.
         - Использует умную трансляцию запросов на английский для англоязычного сегмента Tor.
         """
         results: List[Dict[str, Any]] = []
         search_terms = self.generate_darknet_search_terms(query)
+        logger.info(f"🧅 [Контур 3 Tor] Запуск поиска в .onion по термам: {search_terms}")
 
         for term in search_terms:
             # 1. Попытка через Tor SOCKS5 прокси к официальному скрытому сервису Ahmia .onion
             if self.tor_socks_proxy:
                 try:
-                    # Официальный скрытый сервис Ahmia внутри Tor (без Cloudflare)
+                    logger.info(f"🧅 [Контур 3 Tor] Опрос скрытого сервиса Ahmia .onion (терм: '{term}', таймаут {timeout}s)...")
                     onion_search_url = f"http://juhanurmih5wuwwkgfte6nxha5f47vvai7bop5nm3uzrny3wfoisgd.onion/search/?q={urllib.parse.quote(term)}"
-                    async with httpx.AsyncClient(proxy=self.tor_socks_proxy, timeout=5.0, headers={"User-Agent": USER_AGENT}) as client:
+                    async with httpx.AsyncClient(proxy=self.tor_socks_proxy, timeout=timeout, headers={"User-Agent": USER_AGENT}) as client:
                         resp = await client.get(onion_search_url)
                         if resp.status_code == 200 and resp.text:
                             parsed = self._parse_ahmia_results(resp.text, limit=limit)
                             if parsed:
+                                logger.info(f"🧅 [Контур 3 Tor] Успешно получено {len(parsed)} .onion сервисов через Tor SOCKS5")
                                 results.extend(parsed)
                                 break
                 except Exception as e:
-                    logger.debug(f"Tor SOCKS5 onion Ahmia fetch error ({term}): {e}")
+                    logger.warning(f"🧅 [Контур 3 Tor] Опрос .onion Ahmia через Tor ({term}): {e}")
 
             # 2. Если через Tor .onion не вышло или 0 находок — опрашиваем клирнет-индекс Ahmia через Xray HTTP-прокси
             if not results:
@@ -315,8 +337,8 @@ class DeepSearchEngine:
                 }
                 client_configs = []
                 if self.xray_http_proxy:
-                    client_configs.append({"proxy": self.xray_http_proxy, "timeout": timeout})
-                client_configs.append({"timeout": timeout})
+                    client_configs.append({"proxy": self.xray_http_proxy, "timeout": min(timeout, 12.0)})
+                client_configs.append({"timeout": min(timeout, 12.0)})
 
                 for cfg in client_configs:
                     try:
@@ -325,6 +347,7 @@ class DeepSearchEngine:
                             if resp.status_code == 200 and resp.text:
                                 parsed = self._parse_ahmia_results(resp.text, limit=limit)
                                 if parsed:
+                                    logger.info(f"🧅 [Контур 3 Tor] Успешно получено {len(parsed)} .onion ресурсов через клирнет Ahmia ({cfg})")
                                     results.extend(parsed)
                                     break
                     except Exception as e:
@@ -335,8 +358,10 @@ class DeepSearchEngine:
             # 3. Гарантированный фоллбэк: поиск .onion страниц через DuckDuckGo индекс
             if not results:
                 try:
-                    ddg_onion = await self._search_duckduckgo_onion(term, limit=limit, timeout=timeout)
+                    logger.info(f"🧅 [Контур 3 Tor] Запасной опрос через DuckDuckGo .onion индекс по терму: '{term}'")
+                    ddg_onion = await self._search_duckduckgo_onion(term, limit=limit, timeout=12.0)
                     if ddg_onion:
+                        logger.info(f"🧅 [Контур 3 Tor] Найдено {len(ddg_onion)} .onion ресурсов через DuckDuckGo индекс")
                         results.extend(ddg_onion)
                         break
                 except Exception as ddg_err:
@@ -517,7 +542,8 @@ class DeepSearchEngine:
             "СТРОЖАЙШИЕ ПРАВИЛА ВЕРСТКИ:\n"
             "- Используй ТОЛЬКО разрешенный Telegram HTML (<b>, <i>, <code>, <blockquote>, <a href=\"...\">).\n"
             "- КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО использовать Markdown: никаких **звездочек**, никаких ```кавычек```, никаких знаков > для цитат!\n"
-            "- КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО оборачивать пункты списков в цитаты целиком! Оформляй пункты списком: 1. <b>Заголовок</b>... А тег <blockquote> используй ТОЛЬКО для конкретных коротких цитат спикеров.\n"
+            "- КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО оборачивать целые разделы (особенно раздел 2 «По данным внешних авторитетных источников»), списки или пункты новостей в <blockquote> целиком! Весь текст пиши обычным текстом с <b>заголовками</b>.\n"
+            "- Тег <blockquote> разрешен ИСКЛЮЧИТЕЛЬНО для коротких прямых цитат конкретных спикеров в 1-2 строки (например: <blockquote>«Цитата» — Трамп</blockquote>).\n"
             "- Категорически запрещено использовать шаблоны-заглушки вида '— @канал' или '[@канал](ссылка)'.\n"
             "- Ответ должен быть содержательным, плотным и фактологическим, без пустой воды."
         )
