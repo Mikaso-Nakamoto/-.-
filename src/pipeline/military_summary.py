@@ -7,7 +7,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 logger = logging.getLogger("military_summary")
 
 MILITARY_SUMMARY_MAP_URL = "https://militarysummary.com/"
-MILITARY_SUMMARY_CHANNEL = "https://t.me/militarysummaryru"
+MILITARY_SUMMARY_CHANNEL = "https://t.me/militarysummary"
 
 FRONTLINE_SECTORS = [
     {
@@ -59,7 +59,7 @@ class MilitarySummaryEngine:
     async def get_frontline_overview(self, storage, llm_router=None) -> Dict[str, Any]:
         """
         Анализирует публикации из подключенных военных каналов пользователя
-        (@militarysummaryru, @mod_russia, @Voennaja_svodka, @ross_name, @infomil_live, @rybar)
+        (@militarysummary, @mod_russia, @Voennaja_svodka, @ross_name, @infomil_live, @rybar)
         и формирует оперативную карточку фронта со ссылкой на интерактивную карту.
         """
         recent_feed = storage.get_news_feed(limit=250)
@@ -76,7 +76,7 @@ class MilitarySummaryEngine:
         lines = [
             "🗺 <b>ИНТЕРАКТИВНАЯ КАРТА СВО — MILITARY SUMMARY</b>\n",
             f"🌐 <b>Гео-портал карты:</b> <a href=\"{self.map_url}\">militarysummary.com</a>",
-            f"📡 <b>Канал аналитики:</b> <a href=\"{self.channel_url}\">@militarysummaryru</a>\n",
+            f"📡 <b>Канал аналитики:</b> <a href=\"{self.channel_url}\">@militarysummary</a>\n",
             "⚔️ <b>Оперативная обстановка по секторам ЛБС (по добавленным источникам):</b>\n"
         ]
 

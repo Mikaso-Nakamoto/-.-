@@ -64,7 +64,7 @@ class DigestBuilder:
         key_channel_names = {
             "ross_name", "dyadyabatya0", "rybar", "rostov_tsargrad",
             "voennaja_svodka", "infomil_live", "medvedev_telegram",
-            "mod_russia", "militarysummaryru",
+            "mod_russia", "militarysummary",
             "it_shelter", "github_radar", "prepodsteam", "bugfeature",
             "cyberpolice_rus", "xakep_ru"
         }

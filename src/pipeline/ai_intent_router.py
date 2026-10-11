@@ -101,7 +101,7 @@ class AIIntentRouter:
             return {
                 "action": "frontline_map",
                 "clean_query": raw,
-                "target_channels": ["militarysummaryru"],
+                "target_channels": ["militarysummary"],
                 "confidence": 0.98,
                 "reason": "Запрос интерактивной карты СВО / Military Summary"
             }
