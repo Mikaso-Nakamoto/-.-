@@ -158,6 +158,15 @@ class LLMRouter:
             from src.llm.prompts import AI_CURATOR_SYSTEM_PROMPT
             return prompts.get("ai_curator", AI_CURATOR_SYSTEM_PROMPT)
 
+        if task == "deep_search":
+            return prompts.get("deep_search", "Ты ведущий OSINT-аналитик разведцентра.")
+
+        if task == "classification":
+            return prompts.get("intent_router", "Ты автономный классификатор намерений.")
+
+        if task == "decomposer":
+            return prompts.get("query_decomposer", "Ты автономный планировщик запросов.")
+
         m_lower = model.lower()
         if provider == "local":
             return prompts.get("local_qwen") or prompts.get("lightweight_models")

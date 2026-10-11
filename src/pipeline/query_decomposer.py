@@ -4,6 +4,7 @@ import re
 from typing import Dict, Any, List, Optional
 
 from src.llm.router import LLMRouter
+from src.config import load_prompts
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +116,8 @@ class QueryDecomposer:
         if not llm_router:
             return self.fallback_decompose(raw)
 
-        system_prompt = (
+        prompts = load_prompts().get("system_prompts", {})
+        system_prompt = prompts.get("query_decomposer") or (
             "ТЫ — АВТОНОМНЫЙ АНАЛИТИК И ПЛАНИРОВЩИК ПОИСКОВЫХ ЗАПРОСОВ («АГЕНТ СНОУДЕН»).\n"
             "Твоя задача — развернуть широкий или общий запрос пользователя в структурированную матрицу поиска:\n"
             "1. Выдели конкретные названия систем, моделей, марки, термины, кодовые имена (например: Герань-5, Ланцет, Князь Вандал, CVE, Покровск).\n"
@@ -130,7 +132,7 @@ class QueryDecomposer:
 
         try:
             res = await llm_router.generate_response(
-                task="classification",
+                task="decomposer",
                 user_prompt=f"Запрос пользователя:\n«{raw}»",
                 override_system_prompt=system_prompt
             )

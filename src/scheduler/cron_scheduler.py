@@ -12,7 +12,7 @@ from aiogram.types import FSInputFile, LinkPreviewOptions, InputMediaPhoto, Buff
 from aiogram.exceptions import TelegramBadRequest
 
 from src.pipeline.digest_builder import DigestBuilder
-from src.config import SchedulerConfig, load_preferences
+from src.config import SchedulerConfig, load_preferences, load_prompts
 from src.bot.keyboards import get_digest_feedback_keyboard
 
 logger = logging.getLogger(__name__)
@@ -263,14 +263,16 @@ class DigestScheduler:
                         "3. КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО добавлять блоки цитат <blockquote>, подписи '— @канал', 'Источники: [@канал](ссылка)' или любые шаблоны.\n"
                         "4. Начинай сразу с анализа сути без лишних вводных слов."
                     )
+                    prompts = load_prompts().get("system_prompts", {})
+                    express_prompt = prompts.get("express_alert") or (
+                        "Ты — высококлассный геополитический аналитик разведцентра «Агент Сноуден» (2026 год). "
+                        "Выдели главное зерно заявления Дмитрия Медведева в 2-3 емких предложениях. "
+                        "Не используй шаблонные заглушки, повторные цитаты или фиктивные ссылки на источники."
+                    )
                     res = await self.builder.router.generate_response(
                         task="chat",
                         user_prompt=ai_prompt,
-                        override_system_prompt=(
-                            "Ты высококлассный геополитический аналитик. "
-                            "Выдели главное зерно заявления Дмитрия Медведева в 2-3 емких предложениях. "
-                            "Не используй шаблонные заглушки, повторные цитаты или фиктивные ссылки на источники."
-                        )
+                        override_system_prompt=express_prompt
                     )
                     if res.get("success"):
                         raw_analysis = res.get("content", "").strip()

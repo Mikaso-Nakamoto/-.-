@@ -15,6 +15,7 @@ from src.pipeline.storage import Storage
 from src.pipeline.trust_manager import TrustManager
 from src.pipeline.google_grounding import GoogleSearchGroundingEngine
 from src.pipeline.query_decomposer import QueryDecomposer
+from src.config import load_prompts
 
 logger = logging.getLogger(__name__)
 
@@ -597,15 +598,16 @@ class DeepSearchEngine:
             "- Ответ должен быть содержательным, плотным и фактологическим, без пустой воды."
         )
 
-        system_prompt = (
-            "Ты — ведущий OSINT-аналитик разведцентра «Агент Сноуден». "
+        prompts = load_prompts().get("system_prompts", {})
+        system_prompt = prompts.get("deep_search") or (
+            "Ты — ведущий OSINT-аналитик разведцентра «Агент Сноуден» (2026 год). "
             "Твоя задача — проводить глубокий многоконтурный поиск информации, сопоставлять данные "
-            "из личных закрытых/отслеживаемых каналов пользователя с открытым вебом и теневым сегментом (.onion), "
-            "и выдавать безупречно структурированный, доказательный отчет с первоисточниками."
+            "из личных закрытых/отслеживаемых каналов пользователя с открытым вебом, поисковым индексом Google (Gemini Grounding) "
+            "и теневым сегментом (.onion), и выдавать безупречно структурированный, доказательный отчет с первоисточниками."
         )
 
         ai_res = await llm_router.generate_response(
-            task="chat",
+            task="deep_search",
             user_prompt=ai_prompt,
             override_system_prompt=system_prompt
         )
