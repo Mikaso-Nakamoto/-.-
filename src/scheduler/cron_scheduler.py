@@ -118,21 +118,25 @@ class DigestScheduler:
                     pass
 
             # 2. Затем отправляем структурированный текстовый пост
-            try:
-                if len(full_post) > 4000:
-                    for x in range(0, len(full_post), 4000):
-                        await self.bot.send_message(target_admin, full_post[x:x+4000], parse_mode="HTML")
-                    await self.bot.send_message(target_admin, "💬 <b>Действия со сводкой:</b>", parse_mode="HTML", reply_markup=kb)
-                else:
+            from src.bot.handlers import split_telegram_html
+            chunks = split_telegram_html(full_post, max_chunk=3800)
+
+            for idx, chunk in enumerate(chunks):
+                is_last = (idx == len(chunks) - 1)
+                cur_markup = kb if is_last else None
+                try:
                     await self.bot.send_message(
                         target_admin,
-                        full_post,
+                        chunk,
                         parse_mode="HTML",
-                        reply_markup=kb
+                        reply_markup=cur_markup
                     )
-            except TelegramBadRequest as e:
-                logger.warning(f"Telegram parse error in morning digest ({e}), sending plain text...")
-                await self.bot.send_message(target_admin, full_post, reply_markup=kb)
+                except TelegramBadRequest as e:
+                    logger.warning(f"Telegram parse error in morning digest chunk {idx} ({e}), sending sanitized plain text...")
+                    clean_text = html.unescape(re.sub(r'<[^>]+>', '', chunk))
+                    await self.bot.send_message(target_admin, clean_text, reply_markup=cur_markup)
+                except Exception as e:
+                    logger.error(f"Failed to send digest chunk {idx}: {e}")
 
             # 3. Отправляем полноценный .MD документ прямо в Telegram
             if md_path and os.path.exists(md_path):

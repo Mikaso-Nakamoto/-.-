@@ -191,43 +191,100 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
         except Exception as e:
             logger.error(f"Необработанная ошибка при edit_text: {e}")
 
-    async def send_safe_reply(msg: Message, text: str, reply_markup=None, link_preview_options: LinkPreviewOptions = None):
-        html_text = markdown_to_telegram_html(text)
-        try:
-            if len(html_text) > 4000:
-                for x in range(0, len(html_text), 4000):
-                    await msg.answer(html_text[x:x+4000], parse_mode="HTML")
-                if reply_markup:
-                    await msg.answer("💬 <b>Управление:</b>", parse_mode="HTML", reply_markup=reply_markup)
+def split_telegram_html(text: str, max_chunk: int = 3800) -> List[str]:
+    """
+    Интеллектуальное разделение длинных HTML сообщений для Telegram:
+    - Разделяет строго по границам параграфов (\\n\\n) и новостных карточек.
+    - Никогда не режет HTML-теги или слова посредине!
+    - Гарантирует баланс открывающих и закрывающих тегов (<b>, <i>, <code>, <blockquote>) внутри каждого чанка.
+    """
+    if len(text) <= max_chunk:
+        return [text]
+
+    chunks = []
+    paragraphs = text.split("\n\n")
+    current_chunk = []
+    current_len = 0
+
+    for p in paragraphs:
+        p_len = len(p) + 2
+        if current_len + p_len > max_chunk:
+            if current_chunk:
+                chunks.append("\n\n".join(current_chunk))
+                current_chunk = [p]
+                current_len = len(p)
             else:
+                lines = p.split("\n")
+                sub_chunk = []
+                sub_len = 0
+                for line in lines:
+                    l_len = len(line) + 1
+                    if sub_len + l_len > max_chunk:
+                        if sub_chunk:
+                            chunks.append("\n".join(sub_chunk))
+                            sub_chunk = [line]
+                            sub_len = len(line)
+                        else:
+                            chunks.append(line[:max_chunk])
+                            sub_chunk = [line[max_chunk:]]
+                            sub_len = len(line[max_chunk:])
+                    else:
+                        sub_chunk.append(line)
+                        sub_len += l_len
+                if sub_chunk:
+                    current_chunk = ["\n".join(sub_chunk)]
+                    current_len = sub_len
+        else:
+            current_chunk.append(p)
+            current_len += p_len
+
+    if current_chunk:
+        chunks.append("\n\n".join(current_chunk))
+
+    balanced_chunks = []
+    for chunk in chunks:
+        # Проверяем баланс тегов Telegram
+        for tag in ["b", "i", "code", "blockquote", "pre", "a"]:
+            open_count = len(re.findall(rf"<{tag}(?:\s+[^>]*)?>", chunk, flags=re.IGNORECASE))
+            close_count = len(re.findall(rf"</{tag}>", chunk, flags=re.IGNORECASE))
+            if open_count > close_count:
+                chunk += f"</{tag}>" * (open_count - close_count)
+            elif close_count > open_count:
+                chunk = f"<{tag}>" * (close_count - open_count) + chunk
+        balanced_chunks.append(chunk)
+
+    return balanced_chunks
+
+    async def send_safe_reply(msg: Message, text: str, reply_markup=None, link_preview_options: LinkPreviewOptions = None):
+        # Если текст уже содержит HTML разметку Telegram (<b>, <a>, <blockquote>),
+        # не прогоняем через markdown_to_telegram_html повторно, чтобы не ломать теги!
+        if "<b" in text or "<a " in text or "<blockquote" in text or "<code" in text:
+            html_text = text
+        else:
+            html_text = markdown_to_telegram_html(text)
+
+        chunks = split_telegram_html(html_text, max_chunk=3800)
+
+        for idx, chunk in enumerate(chunks):
+            is_last = (idx == len(chunks) - 1)
+            cur_markup = reply_markup if is_last else None
+            try:
                 await msg.answer(
-                    html_text,
+                    chunk,
                     parse_mode="HTML",
-                    reply_markup=reply_markup,
+                    reply_markup=cur_markup,
                     link_preview_options=link_preview_options
                 )
-        except TelegramBadRequest as e:
-            logger.warning(f"Telegram HTML parse error ({e}), retrying as plain text...")
-            try:
-                if len(text) > 4000:
-                    for x in range(0, len(text), 4000):
-                        await msg.answer(text[x:x+4000])
-                    if reply_markup:
-                        await msg.answer("💬 Управление:", reply_markup=reply_markup)
-                else:
-                    await msg.answer(text, reply_markup=reply_markup)
-            except Exception as e2:
-                logger.error(f"Send with reply_markup failed ({e2}), retrying plain message...")
+            except TelegramBadRequest as e:
+                logger.warning(f"Telegram HTML parse error in chunk {idx} ({e}), retrying with sanitized plain text...")
                 try:
-                    await msg.answer(text)
-                except Exception as e3:
-                    logger.error(f"Fatal send_safe_reply error: {e3}")
-        except Exception as e:
-            logger.error(f"Failed to send message: {e}")
-            try:
-                await msg.answer(f"⚠️ Ошибка отправки: {e}")
-            except Exception:
-                pass
+                    # Чистим все теги до чистого текста, чтобы пользователь НИКОГДА не видел сырой HTML код!
+                    clean_text = html.unescape(re.sub(r'<[^>]+>', '', chunk))
+                    await msg.answer(clean_text, reply_markup=cur_markup)
+                except Exception as e2:
+                    logger.error(f"Fallback plain text failed ({e2}): {e2}")
+            except Exception as e:
+                logger.error(f"Failed to send chunk {idx}: {e}")
 
     # --------------------------------------------------------------------------
     # Главное меню (Команда /start или кнопка "Главное меню", а также слова "старт", "меню")
@@ -380,9 +437,15 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
         if isinstance(event, CallbackQuery):
             await event.answer("Сбор публикаций и генерация дайджеста...")
 
-        wait_msg = await msg.answer("⏳ <i>Идет сбор новостей и формирование аналитического отчета...</i>", parse_mode="HTML")
+        wait_msg = await msg.answer("⏳ <i>Инициализация сбора публикаций... ⠋</i>", parse_mode="HTML")
 
-        res = await digest_builder.generate_digest()
+        async def update_progress(text: str):
+            try:
+                await wait_msg.edit_text(text, parse_mode="HTML")
+            except Exception:
+                pass
+
+        res = await digest_builder.generate_digest(on_progress=update_progress)
         try:
             await wait_msg.delete()
         except Exception:
@@ -520,9 +583,48 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
         )
 
     # --------------------------------------------------------------------------
-    # Тумблер тестового режима (не сохранять в БД во время тестов): /testmode
+    # Ручной запуск сбора свежих новостей: /refresh или /update
     # --------------------------------------------------------------------------
-    @r.message(Command("testmode"))
+    @r.message(Command("refresh", "update", "collect"))
+    async def cmd_refresh_news(msg: Message):
+        if not is_admin(msg.from_user.id):
+            return
+
+        wait_msg = await msg.answer(
+            "🔄 <b>[1/3] Запуск сбора свежих публикаций...</b>\n"
+            "<i>Опрашиваю Telegram-каналы и RSS-ленты... ⠋</i>",
+            parse_mode="HTML"
+        )
+
+        try:
+            items = await digest_builder.collect_fresh_news()
+
+            try:
+                await wait_msg.edit_text(
+                    "💾 <b>[2/3] Синхронизация оперативного хранилища...</b>\n"
+                    f"<i>Сохраняю {len(items)} публикаций в буфер поиска... ⠹</i>",
+                    parse_mode="HTML"
+                )
+            except Exception:
+                pass
+
+            await asyncio.sleep(0.4)
+            test_status = " <i>(Включен тестовый режим: БД не засоряется)</i>" if storage.is_test_mode() else ""
+            await wait_msg.edit_text(
+                f"✅ <b>Сбор публикаций успешно завершен!</b>\n\n"
+                f"📥 Собрано свежих материалов: <b>{len(items)}</b>\n"
+                f"🗄 Обновлен буфер оперативного поиска для ИИ и диалога в чате.{test_status}\n\n"
+                f"💡 Теперь можно сформировать утреннюю сводку через <code>/digest</code> или задать вопрос в <code>/chat</code>.",
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logger.error(f"Ошибка при сборе новостей по /refresh: {e}")
+            await wait_msg.edit_text(f"⚠️ Ошибка при сборе публикаций: {e}", parse_mode="HTML")
+
+    # --------------------------------------------------------------------------
+    # Тумблер тестового режима (не сохранять в БД во время тестов): /test_mode или /testmode
+    # --------------------------------------------------------------------------
+    @r.message(Command("test_mode", "testmode"))
     async def cmd_toggle_testmode(msg: Message):
         if not is_admin(msg.from_user.id):
             return
@@ -540,7 +642,7 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
         now_mode = storage.is_test_mode()
         status_text = (
             "🟢 <b>ВКЛЮЧЕН (1 / True)</b>\n"
-            "<i>Новости НЕ помечаются прочитанными и НЕ сохраняются в постоянную базу. "
+            "<i>Новости НЕ помечаются прочитанными и НЕ сжигаются в постоянной БД. "
             "Дайджесты и чат не засоряют диск. Можно тестировать бесконечно!</i>"
         ) if now_mode else (
             "⚪️ <b>ВЫКЛЮЧЕН (0 / False)</b>\n"
@@ -549,7 +651,7 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
         await send_safe_reply(
             msg,
             f"⚙️ <b>Тумблер тестового режима:</b>\n\n{status_text}\n\n"
-            f"Команды: <code>/testmode on</code> или <code>/testmode off</code>"
+            f"Команды: <code>/test_mode on</code> или <code>/test_mode off</code>"
         )
 
     # --------------------------------------------------------------------------
@@ -818,7 +920,7 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
             await safe_edit_text(call, text, get_sources_menu_keyboard())
 
     # 4. Быстрые команды для прямого добавления/удаления каналов и RSS
-    @r.message(Command("addchannel"))
+    @r.message(Command("add_channel", "addchannel"))
     async def cmd_quick_addchannel(msg: Message):
         if not is_admin(msg.from_user.id):
             return
@@ -828,11 +930,11 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
             await send_safe_reply(
                 msg,
                 "ℹ️ <b>Использование команды:</b>\n"
-                "<code>/addchannel @username [Категория]</code>\n\n"
+                "<code>/add_channel @username [Категория]</code>\n\n"
                 "<i>Примеры:</i>\n"
-                "• <code>/addchannel @xakep_ru</code> (ИИ автоматически определит категорию!)\n"
-                "• <code>/addchannel @habr_com DevOps & Linux</code>\n"
-                "• <code>/addchannel https://t.me/ai_newz</code>"
+                "• <code>/add_channel @xakep_ru</code> (ИИ автоматически определит категорию!)\n"
+                "• <code>/add_channel @habr_com DevOps & Linux</code>\n"
+                "• <code>/add_channel https://t.me/ai_newz</code>"
             )
             return
 
@@ -854,21 +956,21 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
             reply_markup=get_sources_menu_keyboard()
         )
 
-    @r.message(Command("delchannel"))
+    @r.message(Command("del_channel", "delchannel", "del_source", "delsource"))
     async def cmd_quick_delchannel(msg: Message):
         if not is_admin(msg.from_user.id):
             return
 
         parts = msg.text.strip().split()
         if len(parts) < 2:
-            await send_safe_reply(msg, "ℹ️ <b>Использование:</b> <code>/delchannel @username</code>")
+            await send_safe_reply(msg, "ℹ️ <b>Использование:</b> <code>/del_channel @username</code>")
             return
 
         username = parts[1]
         success, result_msg = remove_telegram_channel(username)
         await send_safe_reply(msg, f"{'🗑' if success else '⚠️'} {result_msg}", reply_markup=get_sources_menu_keyboard())
 
-    @r.message(Command("addrss"))
+    @r.message(Command("add_rss", "addrss"))
     async def cmd_quick_addrss(msg: Message):
         if not is_admin(msg.from_user.id):
             return
@@ -878,10 +980,10 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
             await send_safe_reply(
                 msg,
                 "ℹ️ <b>Использование команды:</b>\n"
-                "<code>/addrss &lt;URL&gt; [Категория]</code>\n\n"
+                "<code>/add_rss &lt;URL&gt; [Категория]</code>\n\n"
                 "<i>Примеры:</i>\n"
-                "• <code>/addrss https://3dnews.ru/news/rss/</code> (ИИ определит категорию автоматически)\n"
-                "• <code>/addrss https://habr.com/ru/rss/hubs/all/ Hardware</code>"
+                "• <code>/add_rss https://3dnews.ru/news/rss/</code> (ИИ определит категорию автоматически)\n"
+                "• <code>/add_rss https://habr.com/ru/rss/hubs/all/ Hardware</code>"
             )
             return
 
@@ -903,7 +1005,7 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
             reply_markup=get_sources_menu_keyboard()
         )
 
-    @r.message(Command("delrss"))
+    @r.message(Command("del_rss", "delrss"))
     async def cmd_quick_delrss(msg: Message):
         if not is_admin(msg.from_user.id):
             return

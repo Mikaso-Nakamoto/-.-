@@ -4,32 +4,28 @@ user:
   digest_time: "08:50"
 
 interests:
+  - name: "Военная хроника, СВО & Безопасность регионов"
+    keywords: ["сво", "фронт", "ростов", "белгород", "курск", "атака", "удар", "дрон", "бпла", "пво", "мост", "терминал", "военкор", "минобороны", "бои", "обстрел"]
+    priority: "highest"
+
+  - name: "Мировая геополитика & Международные отношения"
+    keywords: ["россия", "сша", "китай", "трамп", "путин", "переговоры", "санкции", "дипломатия", "нато", "ес", "ближний восток"]
+    priority: "high"
+
   - name: "Полезный софт & Open-Source"
     keywords: ["софт", "утилита", "open source", "репозиторий", "аналог", "photocraft", "wordcraft", "бесплатно", "замена", "инструмент", "github", "релиз", "программа", "soft"]
     priority: "high"
 
-  - name: "Нейросети и ИИ"
-    keywords: ["qwen", "llama", "deepseek", "openai", "claude", "gemini", "нейросеть", "llm", "vllm", "ollama", "инференс", "модель"]
+  - name: "Кибербезопасность & Право"
+    keywords: ["киберполиция", "мвд", "хакер", "уязвимость", "взлом", "мошенничество", "фишинг", "cve", "инфобез", "exploit", "патч"]
     priority: "high"
 
-  - name: "Кибербезопасность & IT"
-    keywords: ["хакер", "уязвимость", "взлом", "malware", "ddos", "безопасность", "cve", "инфобез", "exploit", "патч", "эксплойт"]
-    priority: "high"
-
-  - name: "Hardware & GPU"
-    keywords: ["nvidia", "geforce", "rtx", "amd", "intel", "процессор", "видеокарта", "vram", "чип", "память"]
-    priority: "high"
-
-  - name: "Мировая политика & Геополитика"
-    keywords: ["украина", "сво", "россия", "сша", "нато", "китай", "санкции", "переговоры", "дипломатия", "евросоюз", "военн", "фронт", "события"]
-    priority: "high"
-
-  - name: "DevOps & Self-Hosted"
-    keywords: ["docker", "linux", "tailscale", "vpn", "ssh", "сервер", "wireguard", "self-hosted", "kestra"]
+  - name: "Нейросети, Hardware & ИИ"
+    keywords: ["qwen", "llama", "deepseek", "openai", "gemini", "нейросеть", "llm", "nvidia", "gpu", "чип", "модель"]
     priority: "medium"
 
-  - name: "Разработка и GameDev"
-    keywords: ["python", "gamedev", "unreal", "unity", "github", "open source", "релиз", "код"]
+  - name: "DevOps & Self-Hosted"
+    keywords: ["docker", "linux", "tailscale", "vpn", "ssh", "сервер", "wireguard", "self-hosted"]
     priority: "medium"
 
   - name: "Экономика и Финансы"

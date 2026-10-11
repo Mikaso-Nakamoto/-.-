@@ -80,9 +80,21 @@ def markdown_to_telegram_html(text: str) -> str:
     # 4.1. Преобразуем цитаты Markdown (> цитата -> <blockquote>цитата</blockquote>)
     def save_md_quote(m):
         q_lines = [re.sub(r'^\s*>\s?', '', l) for l in m.group(0).split('\n') if l.strip()]
-        q_text = html.escape("\n".join(q_lines))
+        q_text = "\n".join(q_lines)
+        # 1. Обрабатываем ссылки внутри цитаты [текст](url)
+        q_text = re.sub(r'\[([^\]]+)\]\((https?://[^\)]+)\)', r'<a href="\2">\1</a>', q_text)
+        # 2. Обрабатываем жирный шрифт **текст**
+        q_text = re.sub(r'\*\*([^\*]+?)\*\*', r'<b>\1</b>', q_text)
+        # 3. Экранируем спецсимволы вне сформированных тегов
+        parts = re.split(r'(<[^>]+>)', q_text)
+        safe_parts = []
+        for p in parts:
+            if re.match(r'^<[^>]+>$', p):
+                safe_parts.append(p)
+            else:
+                safe_parts.append(html.escape(p))
         idx = len(allowed_tags)
-        allowed_tags.append(f"<blockquote>{q_text}</blockquote>")
+        allowed_tags.append(f"<blockquote>{''.join(safe_parts)}</blockquote>")
         return f"XZXALLOWEDTAG{idx}XZX"
 
     text = re.sub(r'(?m)^(?:>[^\n]*\n?)+', save_md_quote, text)

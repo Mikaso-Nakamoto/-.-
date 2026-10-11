@@ -427,7 +427,13 @@ class DigestBuilder:
 """
         return html_template
 
-    async def generate_digest(self, force_all: bool = False) -> Dict[str, Any]:
+    async def generate_digest(self, force_all: bool = False, on_progress: Any = None) -> Dict[str, Any]:
+        if on_progress:
+            try:
+                await on_progress("📡 <b>[1/4] Сбор публикаций...</b>\n<i>Опрашиваю Telegram-каналы и RSS-ленты... ⠋</i>")
+            except Exception:
+                pass
+
         items = await self.collect_fresh_news()
 
         if not items:
@@ -440,8 +446,14 @@ class DigestBuilder:
                 "lead_image_url": ""
             }
 
+        if on_progress:
+            try:
+                await on_progress(f"🔍 <b>[2/4] Кластеризация и балансировка...</b>\n<i>Обработано {len(items)} материалов. Балансирую темы (СВО, политика, софт)... ⠙</i>")
+            except Exception:
+                pass
+
         # ЭТАП 1: ИИ-Куратор (AI Content Curator)
-        # Отбирает топ-15–20 самых ценных материалов (включая полезный софт, утилиты, фронт, геополитику, ИИ)
+        # Отбирает сбалансированный срез публикаций (включая СВО, геополитику, полезный софт, кибербезопасность)
         curated_items = await self.curate_items_with_ai(items)
         logger.info(f"Выборка сформирована: {len(curated_items)} публикаций передаются генератору дайджеста.")
 
@@ -497,6 +509,13 @@ class DigestBuilder:
             learned_preferences=learned_prefs
         )
 
+        if on_progress:
+            try:
+                active_p = self.router.active_provider.upper()
+                await on_progress(f"🧠 <b>[3/4] Аналитический ИИ-синтез...</b>\n<i>Генерация сводки и кросс-анализ первоисточников ({active_p})... ⠹</i>")
+            except Exception:
+                pass
+
         logger.info("Отправка сформированного пакета новостей и софта в LLM...")
         llm_res = await self.router.generate_response(task="digest", user_prompt=user_prompt)
 
@@ -509,6 +528,12 @@ class DigestBuilder:
                 "items_count": len(items),
                 "lead_image_url": lead_image_url
             }
+
+        if on_progress:
+            try:
+                await on_progress("✨ <b>[4/4] Финализация отчета...</b>\n<i>Подбираю фотоматериалы и верстаю Telegram-пост... ⠸</i>")
+            except Exception:
+                pass
 
         content = llm_res.get("content", "").strip()
         provider = llm_res.get("provider", "unknown")
