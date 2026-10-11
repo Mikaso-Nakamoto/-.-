@@ -104,10 +104,9 @@ POPULAR_MODELS = {
         ("Gemma 2 9B IT", "gemma2-9b-it")
     ],
     "gemini": [
-        ("Gemini 2.5 Flash (Рекомендуемая)", "gemini-2.5-flash"),
-        ("Gemini 2.0 Flash", "gemini-2.0-flash"),
+        ("Gemini 2.0 Flash (Рекомендуемая)", "gemini-2.0-flash"),
         ("Gemini 1.5 Flash", "gemini-1.5-flash"),
-        ("Gemini 2.5 Pro", "gemini-2.5-pro")
+        ("Gemini 1.5 Pro", "gemini-1.5-pro")
     ],
     "local": [
         ("Qwen 2.5 7B (LM Studio)", "qwen2.5-7b-instruct")
@@ -118,10 +117,14 @@ class LLMRouter:
     def __init__(self, config: LLMConfig):
         self.config = config
         self.active_provider = config.default_provider
+        gemini_model = config.gemini.model or "gemini-2.0-flash"
+        if "2.5" in gemini_model or "3.5" in gemini_model:
+            gemini_model = "gemini-2.0-flash"
+            self.config.gemini.model = gemini_model
         self.active_models = {
             "local": config.local.model or "qwen2.5-7b-instruct",
             "groq": config.groq.model or "llama-3.3-70b-versatile",
-            "gemini": config.gemini.model or "gemini-3.5-flash",
+            "gemini": gemini_model,
             "openrouter": config.openrouter.model or "google/gemini-2.0-flash-exp:free"
         }
 
@@ -134,6 +137,8 @@ class LLMRouter:
 
     def set_model(self, provider: str, model_name: str):
         if provider in self.active_models:
+            if provider == "gemini" and ("2.5" in model_name or "3.5" in model_name):
+                model_name = "gemini-2.0-flash"
             self.active_models[provider] = model_name
             if provider == "groq":
                 self.config.groq.model = model_name
@@ -216,10 +221,16 @@ class LLMRouter:
         elif provider == "gemini":
             if not self.config.gemini.api_key:
                 return None, None
+            proxy_url = os.getenv("GEMINI_PROXY") or os.getenv("WEB_SEARCH_PROXY") or os.getenv("HTTP_PROXY") or os.getenv("HTTPS_PROXY") or "http://127.0.0.1:10809"
+            try:
+                http_client = httpx.AsyncClient(proxy=proxy_url, timeout=timeout)
+            except Exception as pe:
+                logger.warning(f"Не удалось инициализировать прокси {proxy_url} для Gemini: {pe}, используем прямое подключение")
+                http_client = httpx.AsyncClient(timeout=timeout)
             client = AsyncOpenAI(
                 base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
                 api_key=self.config.gemini.api_key,
-                timeout=timeout
+                http_client=http_client
             )
             return client, self.active_models["gemini"]
 
@@ -285,15 +296,16 @@ class LLMRouter:
                 # Google AI Studio официальные модели
                 gemini_pool = [
                     initial_model,
-                    "gemini-2.5-flash",
                     "gemini-2.0-flash",
                     "gemini-1.5-flash",
-                    "gemini-2.5-pro"
+                    "gemini-1.5-pro"
                 ]
                 models_to_test = []
                 for m in gemini_pool:
-                    if m not in models_to_test:
+                    if m and m not in models_to_test and "2.5" not in m and "3.5" not in m:
                         models_to_test.append(m)
+                if not models_to_test:
+                    models_to_test = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
             elif prov == "groq":
                 groq_pool = [initial_model, "llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
                 models_to_test = [m for m in groq_pool if m]

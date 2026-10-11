@@ -14,7 +14,6 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
     Message,
     CallbackQuery,
-    MessageReactionUpdated,
     FSInputFile,
     LinkPreviewOptions,
     InputMediaPhoto,
@@ -30,6 +29,7 @@ BOT_COMMANDS = [
     BotCommand(command="map", description="🗺 Карта СВО (Military Summary)"),
     BotCommand(command="search", description="🔍 Сетевой поиск (Web & Google AI)"),
     BotCommand(command="find", description="🔎 Найти пост в каналах"),
+    BotCommand(command="model", description="🧠 Выбор ИИ модели и провайдера"),
     BotCommand(command="refresh", description="🔄 Обновить ленту новостей"),
     BotCommand(command="sources", description="📡 Управление источниками"),
     BotCommand(command="status", description="📊 Статус системы и моделей"),
@@ -390,6 +390,8 @@ def build_snowden_menu_text(
             "• <code>/find &lt;текст&gt;</code> — быстрый поиск конкретных постов в архиве каналов\n"
             "• <code>/search &lt;запрос&gt;</code> — глубокий сетевой поиск через облачные модели\n\n"
             "⚙️ <b>Управление системой:</b>\n"
+            "• <code>/model</code> — переключение ИИ-провайдера и выбор модели\n"
+            "• <code>/clear</code> — очистить память текущего диалога\n"
             "• <code>/sources</code> — список подключенных каналов и RSS\n"
             "• <code>/status</code> — статус оборудования и моделей ИИ\n"
             "• <code>/start</code> — главное интерактивное меню\n\n"
@@ -406,49 +408,36 @@ def build_snowden_menu_text(
         await safe_edit_text(call, text, get_main_menu_keyboard(chat_active, get_web_app_url()))
 
     # --------------------------------------------------------------------------
-    # Управление режимом диалога (Включение / Выход / Очистка контекста)
+    # Прямой чат (Чат открыт всегда: статус / очистка памяти / возврат в меню)
     # --------------------------------------------------------------------------
     @r.message(Command("chat"))
-    @r.callback_query(F.data == "btn_chat_start")
-    async def cmd_chat_start(event: Message | CallbackQuery, state: FSMContext):
-        await state.clear()
-        storage.set_chat_mode(True)
+    async def cmd_chat(msg: Message):
+        if not is_admin(msg.from_user.id):
+            return
         active_prov = llm_router.active_provider
-        active_model = llm_router.get_current_model_for_provider(active_prov if active_prov != "auto" else "openrouter")
-
+        active_model = llm_router.get_current_model_for_provider(active_prov if active_prov != "auto" else "gemini")
         text = (
-            "💬 <b>Диалог с Агентом Сноуденом активен!</b>\n\n"
-            f"🧠 <b>Ядро:</b> <code>{active_prov.upper()}</code> (<code>{active_model}</code>)\n\n"
-            "• Я знаю актуальную дату (2026 год) и контекст всех свежих публикаций из каналов.\n"
-            "• Задавай любые вопросы по СВО, ударам, обстановке, геополитике, коду или полезному софту.\n"
-            "• Чтобы выйти из диалога обратно в меню, введи <code>/exit</code> или нажми кнопку ниже."
+            "💬 <b>Чат с Агентом Сноуденом всегда открыт и активен!</b>\n\n"
+            f"🧠 <b>Текущий провайдер:</b> <code>{active_prov.upper()}</code> (<code>{active_model}</code>)\n\n"
+            "• Вы можете в любой момент отправить любой вопрос или тему — ИИ ответит с учетом актуального контекста каналов.\n"
+            "• Для очистки памяти диалога используйте команду /clear или кнопку ниже."
         )
-
-        if isinstance(event, CallbackQuery):
-            await event.answer("Режим диалога включен")
-            await safe_edit_text(event, text, get_chat_control_keyboard())
-        else:
-            await send_safe_reply(event, text, reply_markup=get_chat_control_keyboard())
+        await send_safe_reply(msg, text, reply_markup=get_chat_control_keyboard())
 
     @r.message(Command("exit"))
-    @r.callback_query(F.data == "btn_chat_stop")
-    async def cmd_chat_stop(event: Message | CallbackQuery, state: FSMContext):
+    async def cmd_exit(msg: Message, state: FSMContext):
         await state.clear()
-        storage.set_chat_mode(False)
-        text = (
-            f"🔴 *Режим диалога завершен.*\n\n"
-            f"Вы вернулись в стандартный режим. Сообщения не будут пересылаться в LLM, пока вы снова не активируете чат."
-        )
-        if isinstance(event, CallbackQuery):
-            await event.answer("Режим диалога выключен")
-            await safe_edit_text(event, text, get_main_menu_keyboard(chat_mode=False, web_app_url=get_web_app_url()))
-        else:
-            await send_safe_reply(event, text, reply_markup=get_main_menu_keyboard(chat_mode=False, web_app_url=get_web_app_url()))
+        text = build_snowden_menu_text()
+        await send_safe_reply(msg, text, reply_markup=get_main_menu_keyboard(chat_mode=False, web_app_url=get_web_app_url()))
 
+    @r.message(Command("clear"))
     @r.callback_query(F.data == "btn_chat_clear")
-    async def cb_chat_clear(call: CallbackQuery):
+    async def cb_chat_clear(event: Message | CallbackQuery):
         storage.clear_chat_history()
-        await call.answer("🧹 Память диалога очищена!", show_alert=True)
+        if isinstance(event, CallbackQuery):
+            await event.answer("🧹 Память диалога очищена!", show_alert=True)
+        else:
+            await send_safe_reply(event, "🧹 <b>Память диалога очищена.</b>")
 
     # --------------------------------------------------------------------------
     # Ручной запуск дайджеста (Создает нативный сворачиваемый пост + файл)
@@ -993,30 +982,6 @@ def build_snowden_menu_text(
             )
         else:
             await call.answer("Файл не найден на сервере", show_alert=True)
-
-    # --------------------------------------------------------------------------
-    # Оценка дайджеста (Обратная связь и обучение предпочтений)
-    # --------------------------------------------------------------------------
-    @r.callback_query(F.data.in_(["fb_like", "fb_dislike"]))
-    async def on_digest_feedback(call: CallbackQuery):
-        is_like = call.data == "fb_like"
-        context_snippet = call.message.text[:250] if call.message.text else "Дайджест"
-        storage.record_feedback("like" if is_like else "dislike", context_snippet)
-
-        alert_msg = "👍 Зафиксировано! Сохранено в user_learned_preferences.txt и учтется завтра." if is_like else "👎 Учтено! Снизим приоритет подобных тем в будущих сводках."
-        await call.answer(alert_msg, show_alert=True)
-
-    @r.message_reaction()
-    async def on_reaction_updated(reaction_event: MessageReactionUpdated):
-        """Перехват нативных реакций Telegram (эмодзи 👍, 👎, 🔥, ❤️)"""
-        new_reactions = [r.emoji for r in reaction_event.new_reaction if hasattr(r, "emoji")]
-        if not new_reactions:
-            return
-
-        emoji = new_reactions[0]
-        context = "Реакция на сообщение"
-        storage.record_feedback(emoji, context)
-        logger.info(f"Зафиксирована нативная реакция пользователя: {emoji}")
 
     # --------------------------------------------------------------------------
     # Управление источниками новостей (Telegram каналы и RSS)

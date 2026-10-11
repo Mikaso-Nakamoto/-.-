@@ -25,7 +25,7 @@ class GoogleSearchGroundingEngine:
             pass
         self.api_key = api_key or (cfg.llm.gemini.api_key if cfg and cfg.llm and cfg.llm.gemini else None) or os.getenv("GEMINI_API_KEY")
         self.proxy = proxy or os.getenv("WEB_SEARCH_PROXY") or os.getenv("HTTP_PROXY") or "http://127.0.0.1:10809"
-        self.models_pool = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.5-flash"]
+        self.models_pool = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
         self.trust_manager = TrustManager()
 
     def is_available(self) -> bool:
