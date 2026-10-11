@@ -1,39 +1,10 @@
 # ------------------------------------------------------------------------------
 # РЕЕСТР ДОВЕРЕННЫХ ИСТОЧНИКОВ И ТРАСТВИКОВ («АГЕНТ СНОУДЕН»)
 # ------------------------------------------------------------------------------
-# Используется модулем trust_manager.py для верификации ссылок в поиске (Web + Tor Darknet),
-# отсева фишинговых зеркал и маркировки уровня достоверности фактов.
+# Используется модулем trust_manager.py для верификации ссылок в поиске (Web),
+# маркировки уровня достоверности фактов и защиты от фишинга.
 
-# 1. ТЕНЕВЫЕ РЕЕСТРЫ И ВЕРИФИЦИРОВАННЫЕ КАТАЛОГИ TOR (.ONION)
-darknet_trusted_registries:
-  - name: "OnionTree"
-    domain: "oniontree.org"
-    onion: "http://onions53ehmf4q75.onion"
-    category: "PGP-верифицированный реестр скрытых сервисов"
-    description: "Открытый PGP-подписанный реестр подлинных onion-адресов. Первичный фильтр от фишинга."
-
-  - name: "Daunt (Dread Directory)"
-    domain: "daunt.link"
-    onion: "http://daunt266...onion"
-    category: "Каталог доверенных сервисов Dread"
-    description: "Реестр проверенных форумов и площадок по кибербезопасности."
-
-  - name: "The Hidden Wiki"
-    onion: "http://zqktlwiuavvvqqt4ybvgvi7tyo4hjl5xgfuvpdf6otj5cgwqbym2qad.onion"
-    category: "Классический каталог скрытых сервисов"
-    description: "Архив проверенных ссылок и исследовательских библиотек сети Tor."
-
-  - name: "BreachForums (Официальные зеркала)"
-    onion: "breach"
-    category: "Теневой форум баз данных и утечек"
-    description: "Мониторинг дампов учетных данных и инцидентов безопасности."
-
-  - name: "DuckDuckGo Onion Mirror"
-    onion: "http://duckduckgogg42xjoc72x3sjasowoarfbgcmvfimaftt6twagswzczad.onion"
-    category: "Поисковый шлюз Tor"
-    description: "Официальное защищенное зеркало поисковика DuckDuckGo в сети Tor."
-
-# 2. КИБЕРБЕЗОПАСНОСТЬ, УЯЗВИМОСТИ И ЭКСПЛОЙТЫ
+# 1. КИБЕРБЕЗОПАСНОСТЬ, УЯЗВИМОСТИ И ЭКСПЛОЙТЫ
 cybersecurity_and_exploits:
   - name: "NVD (National Vulnerability Database) & CVE"
     domain: "nvd.nist.gov"

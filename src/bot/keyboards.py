@@ -9,7 +9,7 @@ def get_main_menu_keyboard(chat_mode: bool = False, web_app_url: Optional[str] =
     ]
 
     second_row = [
-        InlineKeyboardButton(text="🔍 Поиск в сети & Tor", callback_data="btn_search_menu"),
+        InlineKeyboardButton(text="🔍 Сетевой поиск", callback_data="btn_search_menu"),
         InlineKeyboardButton(text="📡 Мои источники", callback_data="btn_sources")
     ]
 
@@ -39,36 +39,20 @@ def get_chat_control_keyboard() -> InlineKeyboardMarkup:
         ]
     ])
 
-def get_darknet_keyboard(is_enabled: bool) -> InlineKeyboardMarkup:
-    toggle_text = "🔴 Отключить поиск в Darknet" if is_enabled else "🟢 Включить поиск в Darknet (.onion)"
-    cb_data = "btn_darknet_off" if is_enabled else "btn_darknet_on"
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=toggle_text, callback_data=cb_data)],
-        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="btn_menu")]
-    ])
-
-def get_search_settings_keyboard(is_darknet: bool, is_google_ai: bool) -> InlineKeyboardMarkup:
+def get_search_settings_keyboard(is_google_ai: bool = True) -> InlineKeyboardMarkup:
     google_label = "🌐 Google AI Search: ВКЛ" if is_google_ai else "🌐 Google AI Search: ВЫКЛ"
     google_cb = "btn_google_off" if is_google_ai else "btn_google_on"
-    darknet_label = "🧅 Darknet (.onion): ВКЛ" if is_darknet else "🧅 Darknet (.onion): ВЫКЛ"
-    darknet_cb = "btn_darknet_off" if is_darknet else "btn_darknet_on"
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=google_label, callback_data=google_cb)],
-        [InlineKeyboardButton(text=darknet_label, callback_data=darknet_cb)],
         [InlineKeyboardButton(text="🗺 Карта СВО (Military Summary)", callback_data="btn_military_summary")],
         [InlineKeyboardButton(text="🏠 Главное меню", callback_data="btn_menu")]
     ])
 
-def get_search_result_keyboard(is_darknet_enabled: bool, is_google_ai_enabled: bool = False) -> InlineKeyboardMarkup:
+def get_search_result_keyboard(is_google_ai_enabled: bool = False) -> InlineKeyboardMarkup:
     google_label = "🌐 Google AI: ВКЛ" if is_google_ai_enabled else "🌐 Google AI: ВЫКЛ"
     google_cb = "btn_google_off" if is_google_ai_enabled else "btn_google_on"
-    darknet_label = "🧅 Tor: ВКЛ" if is_darknet_enabled else "🧅 Tor: ВЫКЛ"
-    dark_cb = "btn_darknet_off" if is_darknet_enabled else "btn_darknet_on"
     return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text=google_label, callback_data=google_cb),
-            InlineKeyboardButton(text=darknet_label, callback_data=dark_cb)
-        ],
+        [InlineKeyboardButton(text=google_label, callback_data=google_cb)],
         [InlineKeyboardButton(text="🏠 Главное меню", callback_data="btn_menu")]
     ])
 

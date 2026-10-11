@@ -14,7 +14,7 @@ class AIIntentRouter:
     Интеллектуальный маршрутизатор входящих запросов пользователя.
     Определяет намерения (Intent Classification) и автоматически выбирает нужный инструмент:
     - find_post: поиск конкретного поста/видео/ссылки в каналах или архивах Telegram
-    - deep_search: глубокое исследование темы, мировой поиск фактов, OSINT, утечки, Darknet/Tor
+    - deep_search: сетевой поиск фактов в открытом вебе и по подключенным каналам
     - digest: генерация аналитической сводки новостей / дайджеста
     - status: проверка состояния серверов, видеокарты, LM Studio, прокси
     - chat: обычный диалог, рассуждение, помощь в программировании или консультация
@@ -37,7 +37,6 @@ class AIIntentRouter:
                 "action": "status",
                 "clean_query": raw,
                 "target_channels": [],
-                "include_darknet": False,
                 "confidence": 0.98,
                 "reason": "Запрос диагностики серверов и узлов"
             }
@@ -50,7 +49,6 @@ class AIIntentRouter:
                 "action": "digest",
                 "clean_query": clean_focus,
                 "target_channels": [],
-                "include_darknet": False,
                 "confidence": 0.95,
                 "reason": "Запрос формирования дайджеста / сводки"
             }
@@ -63,7 +61,6 @@ class AIIntentRouter:
                 "action": "deep_search",
                 "clean_query": clean_q or raw,
                 "target_channels": targets,
-                "include_darknet": False,
                 "confidence": 0.95,
                 "reason": "Запрос текущей оперативной обстановки (Deep Search)"
             }
@@ -88,7 +85,6 @@ class AIIntentRouter:
                 "action": "find_post",
                 "clean_query": clean_q,
                 "target_channels": targets,
-                "include_darknet": False,
                 "confidence": 0.95,
                 "reason": "Запрос поиска конкретной публикации в каналах"
             }
@@ -106,28 +102,24 @@ class AIIntentRouter:
                 "action": "frontline_map",
                 "clean_query": raw,
                 "target_channels": ["militarysummaryru"],
-                "include_darknet": False,
                 "confidence": 0.98,
                 "reason": "Запрос интерактивной карты СВО / Military Summary"
             }
 
-        # 5. Явный запрос глубокого поиска / разведки / даркнета
+        # 5. Явный запрос сетевого поиска
         search_triggers = [
-            r'^(?:поиск|поищи|пробей|найди\s+информацию|найди\s+инфу|глубокий\s+поиск|основательный\s+поиск)\b',
-            r'\b(?:найди\s+в\s+интернете|поищи\s+в\s+вебе|найди\s+в\s+вебе|внешний\s+поиск|пробей\s+по\s+вебу)\b',
-            r'(?:даркнет|onion|\.onion|ahmia|сети\s+tor|теневом\s+сегменте|утечк|слив\s+баз)'
+            r'^(?:поиск|поищи|найди\s+информацию|найди\s+инфу|сетевой\s+поиск|глубокий\s+поиск)\b',
+            r'\b(?:найди\s+в\s+интернете|поищи\s+в\s+вебе|найди\s+в\s+вебе|внешний\s+поиск|поищи\s+в\s+гугле)\b'
         ]
-        is_darknet = bool(re.search(r'(?i)(?:даркнет|onion|\.onion|ahmia|сети\s+tor|теневом\s+сегменте|0-day|эксплойт|слив|дамп|утечк)', q_low))
         if any(re.search(pat, q_low) for pat in search_triggers):
-            clean_q = re.sub(r'(?i)^(?:поиск:?|поищи|пробей|найди информацию про|найди инфу про|глубокий поиск:?|найди в интернете|найди в даркнете|пробей по даркнету)\s*', '', raw).strip(' .,:;-')
+            clean_q = re.sub(r'(?i)^(?:поиск:?|поищи|найди информацию про|найди инфу про|глубокий поиск:?|сетевой поиск:?|найди в интернете|поищи в вебе)\s*', '', raw).strip(' .,:;-')
             clean_q, targets = self.semantic_engine.extract_search_intent(clean_q or raw)
             return {
                 "action": "deep_search",
                 "clean_query": clean_q or raw,
                 "target_channels": targets,
-                "include_darknet": is_darknet,
                 "confidence": 0.92,
-                "reason": "Явный запрос на внешний веб/OSINT поиск"
+                "reason": "Явный запрос на сетевой поиск"
             }
 
         return None
@@ -164,8 +156,7 @@ class AIIntentRouter:
                     "{\n"
                     '  "action": "find_post" | "deep_search" | "frontline_map" | "digest" | "status" | "chat",\n'
                     '  "clean_query": "краткая фактологическая суть запроса для поисковика",\n'
-                    '  "target_channels": ["список упомянутых юзернеймов каналов или []"],\n'
-                    '  "include_darknet": true/false (true если запрос касается уязвимостей, 0-day, хакеров, утечек баз данных или сети Tor)\n'
+                    '  "target_channels": ["список упомянутых юзернеймов каналов или []"]\n'
                     "}"
                 )
 
@@ -185,13 +176,11 @@ class AIIntentRouter:
                         if action in ["find_post", "deep_search", "frontline_map", "digest", "status", "chat"]:
                             clean_q = data.get("clean_query") or raw
                             channels = data.get("target_channels") or []
-                            darknet = bool(data.get("include_darknet", False))
-                            logger.info(f"🧠 LLM Intent Classifier: action={action}, query='{clean_q}', darknet={darknet}")
+                            logger.info(f"🧠 LLM Intent Classifier: action={action}, query='{clean_q}'")
                             return {
                                 "action": action,
                                 "clean_query": clean_q,
                                 "target_channels": channels,
-                                "include_darknet": darknet,
                                 "confidence": 0.90,
                                 "reason": "Классифицировано нейросетью"
                             }
@@ -210,12 +199,10 @@ class AIIntentRouter:
 
         if is_informational_or_factual:
             clean_q, targets = self.semantic_engine.extract_search_intent(raw)
-            is_darknet = bool(re.search(r'(?i)\b(?:даркнет|onion|0-day|эксплойт|слив|утечк|cve)\b', q_low))
             return {
                 "action": "deep_search",
                 "clean_query": clean_q,
                 "target_channels": targets,
-                "include_darknet": is_darknet,
                 "confidence": 0.80,
                 "reason": "Фоллбэк: информационный фактологический запрос"
             }
@@ -224,7 +211,6 @@ class AIIntentRouter:
             "action": "chat",
             "clean_query": raw,
             "target_channels": [],
-            "include_darknet": False,
             "confidence": 0.70,
             "reason": "Диалоговое сообщение"
         }

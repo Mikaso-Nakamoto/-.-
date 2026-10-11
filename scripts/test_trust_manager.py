@@ -21,24 +21,17 @@ def test_trust_manager():
     assert "Объективный контроль" in res2["badge"]
     print("✓ LostArmour verified:", res2["badge"])
 
-    # 3. Test verified Onion directory (OnionTree)
-    res3 = tm.verify_url("http://onions53ehmf4q75.onion/services")
+    # 3. Test reputable news/it source
+    res3 = tm.verify_url("https://xakep.ru/2026/10/10/linux-kernel-bug/")
     assert res3["verified"] is True
-    assert "Verified Onion" in res3["badge"]
-    print("✓ OnionTree verified:", res3["badge"])
+    assert "Профильный IT-источник" in res3["badge"]
+    print("✓ Xakep.ru verified:", res3["badge"])
 
-    # 4. Test unverified / suspicious Onion
-    res4 = tm.verify_url("http://unknownscamrandom123456789.onion/login")
+    # 4. Test normal web source
+    res4 = tm.verify_url("https://example.com/some/article")
     assert res4["verified"] is False
-    assert "Неверифицированный Onion" in res4["badge"]
-    assert "Риск фишинга" in res4["badge"]
-    print("✓ Unknown onion flagged as unverified:", res4["badge"])
-
-    # 5. Test reputable news/it source
-    res5 = tm.verify_url("https://xakep.ru/2026/10/10/linux-kernel-bug/")
-    assert res5["verified"] is True
-    assert "Профильный IT-источник" in res5["badge"]
-    print("✓ Xakep.ru verified:", res5["badge"])
+    assert "Открытый Web" in res4["badge"]
+    print("✓ Standard web source categorized:", res4["badge"])
 
     print("=== ALL TRUST MANAGER TESTS PASSED ===")
 

@@ -10,14 +10,12 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 class TrustManager:
     """
     Менеджер доверенных источников и реестров («Траствики»):
-    1. Верифицирует .onion скрытые сервисы сети Tor по криптографическим реестрам (OnionTree, Daunt).
-       Отсеивает потенциальный фишинг и вредоносные зеркала-ловушки.
-    2. Проверяет источники кибербезопасности и эксплойтов (CVE Mitre, Exploit-DB, GitHub Advisories).
-    3. Верифицирует OSINT-источники по СВО и геополитике (LostArmour, объективный контроль с фото/видеофиксацией).
-    4. Обогащает результаты поиска бейджами доверия:
+    1. Проверяет источники кибербезопасности и эксплойтов (CVE Mitre, Exploit-DB, GitHub Advisories).
+    2. Верифицирует OSINT-источники по СВО и геополитике (LostArmour, объективный контроль с фото/видеофиксацией).
+    3. Обогащает результаты поиска бейджами доверия:
        - 🟢 [Траствик / Verified] — проверенный источник из реестра.
        - 🟡 [Авторитетный Web] — профильное издание / СМИ.
-       - ⚠️ [Неверифицированный Onion] — скрытый сервис без PGP-подписи / риск фишинга.
+       - 🌐 [Открытый Web] — стандартный интернет-ресурс.
     """
 
     def __init__(self, config_path: Optional[Path] = None):
@@ -52,48 +50,8 @@ class TrustManager:
 
         parsed = urllib.parse.urlparse(url)
         netloc = parsed.netloc.lower()
-        full_url = url.lower()
-        is_onion = ".onion" in netloc or ".onion" in full_url
 
-        # 1. Проверка по реестру верифицированных Onion-сервисов
-        if is_onion:
-            dark_list = self.data.get("darknet_trusted_registries", [])
-            for reg in dark_list:
-                onion_sig = (reg.get("onion") or "").lower()
-                domain_sig = (reg.get("domain") or "").lower()
-                name = reg.get("name", "Доверенный скрытый сервис")
-                cat = reg.get("category", "Верифицированный каталог")
-
-                if onion_sig and onion_sig in full_url:
-                    return {
-                        "verified": True,
-                        "trust_level": "verified_onion",
-                        "badge": "🟢 [Траствик / Verified Onion]",
-                        "name": name,
-                        "category": cat,
-                        "warning": ""
-                    }
-                if domain_sig and domain_sig in netloc:
-                    return {
-                        "verified": True,
-                        "trust_level": "verified_onion_mirror",
-                        "badge": "🟢 [Траствик / Onion Registry]",
-                        "name": name,
-                        "category": cat,
-                        "warning": ""
-                    }
-
-            # Не найден в базе доверенных PGP-зеркал
-            return {
-                "verified": False,
-                "trust_level": "unverified_onion",
-                "badge": "⚠️ [Неверифицированный Onion / Риск фишинга]",
-                "name": "Неизвестный узел Tor",
-                "category": "Скрытый сервис",
-                "warning": "Ресурс отсутствует в PGP-реестрах OnionTree / Daunt. Возможен фишинг или скам-зеркало."
-            }
-
-        # 2. Проверка по базам киберразведки и CVE
+        # 1. Проверка по базам киберразведки и CVE
         sec_list = self.data.get("cybersecurity_and_exploits", [])
         for item in sec_list:
             dom = (item.get("domain") or "").lower()
@@ -111,7 +69,7 @@ class TrustManager:
                     "warning": ""
                 }
 
-        # 3. Проверка по базам объективного контроля OSINT (СВО / геополитика)
+        # 2. Проверка по базам объективного контроля OSINT (СВО / геополитика)
         osint_list = self.data.get("osint_and_factchecking", [])
         for item in osint_list:
             dom = (item.get("domain") or "").lower()

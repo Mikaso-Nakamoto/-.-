@@ -27,16 +27,14 @@ class DeepSearchEngine:
     Движок многоконтурного глубокого поиска («Агент Сноуден»):
     1. Контур 1: Собственные подключенные источники пользователя (Telegram-каналы, RSS) с семантическим ранжированием.
     2. Контур 2: Внешние авторитетные мировые и профильные источники (Web-поиск, Google Режим ИИ).
-    3. Контур 3: Теневой сегмент сети Tor (.onion / Darknet) — опционально, с возможностью включения/выключения.
-    4. Верификация через Траствики (TrustManager): сверка с PGP-реестрами зеркал Tor (OnionTree/Daunt),
+    3. Верификация через Траствики (TrustManager): сверка с доверенными реестрами,
        базами эксплойтов CVE и базами объективного контроля OSINT (LostArmour).
-    5. Синтез ИИ: сопоставление всех контуров в единый структурированный аналитический отчет.
+    4. Синтез ИИ: сопоставление контуров в единый структурированный аналитический отчет.
     """
 
     def __init__(self, semantic_engine: Optional[SemanticSearchEngine] = None, trust_manager: Optional[TrustManager] = None):
         self.semantic_engine = semantic_engine or SemanticSearchEngine()
         self.trust_manager = trust_manager or TrustManager()
-        self.tor_socks_proxy = os.getenv("TOR_SOCKS_PROXY", "socks5://127.0.0.1:9050")
         self.xray_http_proxy = os.getenv("HTTP_PROXY") or os.getenv("WEB_SEARCH_PROXY") or "http://127.0.0.1:10809"
         self.google_grounding = GoogleSearchGroundingEngine(proxy=self.xray_http_proxy)
         self.decomposer = QueryDecomposer()
@@ -564,266 +562,20 @@ class DeepSearchEngine:
         return self.trust_manager.enrich_items(results[:limit])
 
     @staticmethod
-    def generate_darknet_search_terms(query: str) -> List[str]:
-        """
-        Генерирует специализированные поисковые термы для сети Tor (Ahmia):
-        1. Очищает от русских разговорных стоп-слов ('кто такой', 'что такое', 'расскажи про', 'за последний месяц').
-        2. Извлекает латинские термины, аббревиатуры (0-day, CVE, RCE, Linux, SSH, Chrome, Python).
-        3. Подбирает английские эквиваленты ключевых понятий для охвата англоязычных onion-ресурсов.
-        """
-        terms = []
-        clean_q = query.strip()
-        clean_without_stops = re.sub(
-            r'(?i)\b(?:кто такой|кто такая|что такое|расскажи про|найди мне|найди|поиск|в браузере|в системе|в сети|информация о|информация про|сведения о|заявление|заявления|относительно|по поводу|за последний месяц|за последнюю неделю|за последнее время)\b',
-            '',
-            clean_q
-        ).strip()
-        clean_without_stops = re.sub(r'\s{2,}', ' ', clean_without_stops)
-
-        latin_words = re.findall(r'[a-zA-Z0-9_-]+', clean_q)
-        if len(latin_words) >= 1:
-            terms.append(" ".join(latin_words))
-
-        trans_map = {
-            "гугл": "google chrome",
-            "хром": "chrome",
-            "браузер": "browser",
-            "уязвимост": "vulnerability exploit 0-day",
-            "эксплойт": "exploit 0-day",
-            "взлом": "hack breach",
-            "хакер": "hacker forum",
-            "утечк": "leak database dump",
-            "баз данных": "database breach",
-            "парол": "passwords credentials dump",
-            "владимир путин": "Vladimir Putin",
-            "путин": "Putin",
-            "трамп": "Trump",
-            "иран": "Iran",
-            "войн": "war",
-            "украин": "Ukraine",
-            "войск": "Russian army",
-            "продвижен": "offensive advance",
-            "сво": "Ukraine war",
-            "дрон": "drone uav",
-            "бпла": "uav drone",
-            "оружи": "weapons",
-            "росси": "Russia",
-            "сша": "USA",
-            "китай": "China",
-            "санкци": "sanctions",
-        }
-        q_lower = clean_q.lower()
-        translated_tokens = []
-        for ru_stem, en_eq in trans_map.items():
-            if ru_stem in q_lower:
-                for tok in en_eq.split():
-                    if tok not in translated_tokens:
-                        translated_tokens.append(tok)
-
-        if translated_tokens:
-            terms.append(" ".join(translated_tokens[:4]))
-
-        if clean_without_stops and clean_without_stops not in terms:
-            terms.insert(0, clean_without_stops)
-        elif clean_q not in terms:
-            terms.insert(0, clean_q)
-
-        return list(dict.fromkeys([t for t in terms if t.strip()]))[:3]
-
-    async def _search_duckduckgo_onion(self, term: str, limit: int = 4, timeout: float = 12.0) -> List[Dict[str, Any]]:
-        """Поиск ресурсов теневого сегмента .onion через поисковый индекс DuckDuckGo"""
-        results = []
-        queries_to_try = [f"{term} site:onion", f"\"{term}\" .onion", f"{term} .onion"]
-        headers = {
-            "User-Agent": USER_AGENT,
-            "Accept-Language": "ru,en;q=0.9",
-        }
-        client_configs = []
-        if self.xray_http_proxy:
-            client_configs.append({"proxy": self.xray_http_proxy, "timeout": timeout})
-        client_configs.append({"timeout": timeout})
-
-        for q in queries_to_try:
-            url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(q)}"
-            for cfg in client_configs:
-                try:
-                    async with httpx.AsyncClient(follow_redirects=True, headers=headers, **cfg) as client:
-                        resp = await client.get(url)
-                        if resp.status_code == 200 and resp.text:
-                            soup = BeautifulSoup(resp.text, "html.parser")
-                            for el in soup.find_all("div", class_="result"):
-                                a = el.find("a", class_="result__a") or el.find("a")
-                                snip = el.find("a", class_="result__snippet") or el.find("div", class_="result__snippet")
-                                if a:
-                                    href = a.get("href", "")
-                                    if "uddg=" in href:
-                                        m = re.search(r'uddg=([^&]+)', href)
-                                        if m:
-                                            href = urllib.parse.unquote(m.group(1))
-                                    title = a.get_text(strip=True)
-                                    snippet = snip.get_text(strip=True) if snip else ""
-                                    if ".onion" in href or ".onion" in snippet or ".onion" in title:
-                                        results.append({
-                                            "title": title,
-                                            "url": href,
-                                            "snippet": snippet,
-                                            "source_type": "darknet_onion"
-                                        })
-                                        if len(results) >= limit:
-                                            break
-                    if results:
-                        break
-                except Exception as e:
-                    logger.debug(f"DuckDuckGo onion search ({cfg}) error: {e}")
-            if results:
-                break
-        return results
-
-    async def search_darknet(self, query: str, limit: int = 4, timeout: float = 45.0) -> List[Dict[str, Any]]:
-        """
-        Контур 3: Поиск в скрытом сегменте сети Tor (.onion / Darknet).
-        Использует поисковую систему Ahmia (индексатор ресурсов .onion):
-        - Сначала пробует через локальный Tor SOCKS5-прокси нативный .onion адрес Ahmia без Cloudflare (таймаут 45s).
-        - Затем опрашивает безопасный шлюз ahmia.fi через Xray HTTP-прокси.
-        - При блокировках или нуле находок опрашивает .onion индекс DuckDuckGo.
-        - Использует умную трансляцию запросов на английский для англоязычного сегмента Tor.
-        """
-        results: List[Dict[str, Any]] = []
-        search_terms = self.generate_darknet_search_terms(query)
-        logger.info(f"🧅 [Контур 3 Tor] Запуск поиска в .onion по термам: {search_terms}")
-
-        for term in search_terms:
-            # 1. Попытка через Tor SOCKS5 прокси к официальному скрытому сервису Ahmia .onion
-            if self.tor_socks_proxy:
-                try:
-                    logger.info(f"🧅 [Контур 3 Tor] Опрос скрытого сервиса Ahmia .onion (терм: '{term}', таймаут {timeout}s)...")
-                    onion_search_url = f"http://juhanurmih5wuwwkgfte6nxha5f47vvai7bop5nm3uzrny3wfoisgd.onion/search/?q={urllib.parse.quote(term)}"
-                    async with httpx.AsyncClient(proxy=self.tor_socks_proxy, timeout=timeout, headers={"User-Agent": USER_AGENT}) as client:
-                        resp = await client.get(onion_search_url)
-                        if resp.status_code == 200 and resp.text:
-                            parsed = self._parse_ahmia_results(resp.text, limit=limit)
-                            if parsed:
-                                logger.info(f"🧅 [Контур 3 Tor] Успешно получено {len(parsed)} .onion сервисов через Tor SOCKS5")
-                                results.extend(parsed)
-                                break
-                except Exception as e:
-                    logger.warning(f"🧅 [Контур 3 Tor] Опрос .onion Ahmia через Tor ({term}): {e}")
-
-            # 2. Если через Tor .onion не вышло или 0 находок — опрашиваем клирнет-индекс Ahmia через Xray HTTP-прокси
-            if not results:
-                ahmia_url = f"https://ahmia.fi/search/?q={urllib.parse.quote(term)}"
-                headers = {
-                    "User-Agent": USER_AGENT,
-                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                }
-                client_configs = []
-                if self.xray_http_proxy:
-                    client_configs.append({"proxy": self.xray_http_proxy, "timeout": min(timeout, 12.0)})
-                client_configs.append({"timeout": min(timeout, 12.0)})
-
-                for cfg in client_configs:
-                    try:
-                        async with httpx.AsyncClient(follow_redirects=True, headers=headers, **cfg) as client:
-                            resp = await client.get(ahmia_url)
-                            if resp.status_code == 200 and resp.text:
-                                parsed = self._parse_ahmia_results(resp.text, limit=limit)
-                                if parsed:
-                                    logger.info(f"🧅 [Контур 3 Tor] Успешно получено {len(parsed)} .onion ресурсов через клирнет Ahmia ({cfg})")
-                                    results.extend(parsed)
-                                    break
-                    except Exception as e:
-                        logger.debug(f"Direct Ahmia .onion search error ({cfg}): {e}")
-                if results:
-                    break
-
-            # 3. Гарантированный фоллбэк: поиск .onion страниц через DuckDuckGo индекс
-            if not results:
-                try:
-                    logger.info(f"🧅 [Контур 3 Tor] Запасной опрос через DuckDuckGo .onion индекс по терму: '{term}'")
-                    ddg_onion = await self._search_duckduckgo_onion(term, limit=limit, timeout=12.0)
-                    if ddg_onion:
-                        logger.info(f"🧅 [Контур 3 Tor] Найдено {len(ddg_onion)} .onion ресурсов через DuckDuckGo индекс")
-                        results.extend(ddg_onion)
-                        break
-                except Exception as ddg_err:
-                    logger.debug(f"DDG onion fallback error: {ddg_err}")
-
-        # Дедупликация по url
-        seen = set()
-        deduped = []
-        for it in results:
-            u = it.get("url")
-            if u and u not in seen:
-                seen.add(u)
-                deduped.append(it)
-
-        # Обогащаем результаты проверки по Траствикам (OnionTree, Daunt, The Hidden Wiki)
-        return self.trust_manager.enrich_items(deduped[:limit])
-
-    def _parse_ahmia_results(self, html_text: str, limit: int = 4) -> List[Dict[str, Any]]:
-        """Парсинг результатов поиска по .onion страницам из разметки Ahmia"""
-        results = []
-        soup = BeautifulSoup(html_text, "html.parser")
-        items = soup.find_all("li", class_="result") or soup.find_all("li")
-        for it in items[:limit * 2]:
-            a_tag = None
-            h4 = it.find("h4")
-            if h4:
-                a_tag = h4.find("a")
-            if not a_tag:
-                a_tag = it.find("a")
-            if not a_tag:
-                continue
-
-            title = a_tag.get_text(strip=True)
-            href = a_tag.get("href", "")
-            # Ahmia redirect url: /search/redirect?redirect_url=http://...onion/
-            if "redirect_url=" in href:
-                m = re.search(r'redirect_url=([^&]+)', href)
-                if m:
-                    href = urllib.parse.unquote(m.group(1))
-
-            p_tag = it.find("p")
-            snippet = p_tag.get_text(strip=True) if p_tag else ""
-
-            # Извлекаем cite с .onion адресом только если в href нет полного адреса и в cite нет многоточия
-            cite_tag = it.find("cite")
-            if cite_tag:
-                cite_text = cite_tag.get_text(strip=True)
-                if ".onion" in cite_text and "..." not in cite_text and (".onion" not in href or len(cite_text) > len(href)):
-                    href = cite_text
-
-            if href and not href.startswith("http"):
-                href = "http://" + href
-
-            if ".onion" in href:
-                results.append({
-                    "title": title or "Скрытый ресурс .onion",
-                    "url": href,
-                    "snippet": snippet,
-                    "source_type": "darknet_onion"
-                })
-            if len(results) >= limit:
-                break
-        return results
-
     async def execute_deep_search(
         self,
         query: str,
         storage: Storage,
         llm_router: LLMRouter,
-        include_darknet: Optional[bool] = None,
         refresh_collector_func=None
     ) -> Dict[str, Any]:
         """
-        Главный оркестратор основательного поиска:
-        - Опрашивает все 3 контура (Свои источники, Внешний Web, Darknet при включении).
+        Главный оркестратор основательного сетевого поиска:
+        - Опрашивает контур источников пользователя (Telegram-каналы, RSS).
+        - Опрашивает открытый веб (Google Search Grounding / DuckDuckGo / GitHub / Wikipedia).
         - Формирует развернутый контекст для ИИ.
-        - Получает структурированный аналитический ответ с четким разделением по разделам.
+        - Получает структурированный аналитический ответ с первоисточниками.
         """
-        if include_darknet is None:
-            include_darknet = storage.is_darknet_search_enabled()
-
         use_google_ai = storage.is_google_ai_search_enabled()
         if llm_router and llm_router.config.gemini.api_key:
             self.google_grounding.api_key = llm_router.config.gemini.api_key
@@ -836,7 +588,7 @@ class DeepSearchEngine:
         specific_entities = decomp.get("specific_entities", [])
         search_queries = decomp.get("search_queries", [clean_query])
 
-        # 1. Запуск поиска по всем контурам параллельно
+        # 1. Запуск поиска по контурам параллельно
         user_sources_task = self.search_user_sources(
             search_core,
             storage,
@@ -844,7 +596,6 @@ class DeepSearchEngine:
             target_channels=target_channels,
             specific_entities=specific_entities
         )
-        # Выбор наиболее релевантного поискового запроса для Web (сохраняющего ключевые токены)
         primary_tokens = [w for w in re.findall(r'[а-яА-Яa-zA-Z0-9]+', search_core.lower()) if len(w) > 3]
         best_web_query = search_queries[0] if search_queries else search_core
         if len(search_queries) > 1:
@@ -861,17 +612,12 @@ class DeepSearchEngine:
             llm_router=llm_router,
             fallback_queries=fallback_queries
         )
-        darknet_task = self.search_darknet(search_core, limit=4) if include_darknet else None
 
         tasks = [user_sources_task, web_sources_task]
-        if darknet_task:
-            tasks.append(darknet_task)
-
         gathered = await asyncio.gather(*tasks, return_exceptions=True)
 
         user_sources = gathered[0] if isinstance(gathered[0], list) else []
         web_sources = gathered[1] if isinstance(gathered[1], list) else []
-        darknet_sources = (gathered[2] if len(gathered) > 2 and isinstance(gathered[2], list) else []) if include_darknet else []
 
         # Если в собственных источниках совсем пусто — пробуем оперативно собрать свежие новости из каналов и повторить
         if len(user_sources) == 0 and refresh_collector_func:
@@ -880,7 +626,7 @@ class DeepSearchEngine:
                 user_sources = await self.search_user_sources(
                     search_core,
                     storage,
-                    limit=5,
+                    limit=8,
                     target_channels=target_channels,
                     specific_entities=specific_entities
                 )
@@ -890,39 +636,27 @@ class DeepSearchEngine:
         # 2. Формируем сырой фактологический контекст для LLM
         user_sources_text = ""
         if user_sources:
-            lines = []
-            for i, it in enumerate(user_sources, 1):
+            lines_list = []
+            for idx, it in enumerate(user_sources, 1):
                 ch = it.get("channel", "Канал")
                 tit = it.get("title", "")
                 cnt = it.get("content", "")
                 url = it.get("url", "")
                 pub = it.get("published_at", "")
-                lines.append(f"{i}. [{ch}] ({pub}) {tit}\nТекст: {cnt}\nСсылка: {url}")
-            user_sources_text = "\n\n".join(lines)
+                lines_list.append(f"{idx}. [{ch}] ({pub}) {tit}\nТекст: {cnt}\nСсылка: {url}")
+            user_sources_text = "\n\n".join(lines_list)
         else:
             user_sources_text = "ПОЛНОЕ ОТСУТСТВИЕ СОВПАДЕНИЙ: В подключенных каналах и лентах публикаций по теме запроса не найдено (база проверена)."
 
         web_sources_text = ""
         if web_sources:
-            lines = []
-            for i, it in enumerate(web_sources, 1):
+            lines_list = []
+            for idx, it in enumerate(web_sources, 1):
                 badge = it.get("trust_badge", "🌐 [Открытый Web]")
-                lines.append(f"{i}. {badge} Заголовок: {it.get('title')}\nВыдержка: {it.get('snippet')}\nСсылка: {it.get('url')}")
-            web_sources_text = "\n\n".join(lines)
+                lines_list.append(f"{idx}. {badge} Заголовок: {it.get('title')}\nВыдержка: {it.get('snippet')}\nСсылка: {it.get('url')}")
+            web_sources_text = "\n\n".join(lines_list)
         else:
             web_sources_text = "Внешний открытый веб-поиск не вернул прямых релевантных страниц."
-
-        darknet_sources_text = ""
-        if include_darknet:
-            if darknet_sources:
-                lines = []
-                for i, it in enumerate(darknet_sources, 1):
-                    badge = it.get("trust_badge", "🧅 [Скрытый сервис]")
-                    warn = f"ВНИМАНИЕ: {it.get('trust_warning')}\n" if it.get("trust_warning") else ""
-                    lines.append(f"{i}. {badge} Ресурс: {it.get('title')}\n{warn}Выдержка: {it.get('snippet')}\nOnion-адрес: {it.get('url')}")
-                darknet_sources_text = "\n\n".join(lines)
-            else:
-                darknet_sources_text = "В проиндексированном теневом сегменте (.onion / Darknet) прямых упоминаний и активных утечек по теме не обнаружено."
 
         # 3. Подготовка промпта для ИИ-аналитика
         entities_header = f"ВЫЯВЛЕННЫЕ КЛЮЧЕВЫЕ МОДЕЛИ И СИСТЕМЫ ДЛЯ АНАЛИЗА: {', '.join(specific_entities)}\n\n" if specific_entities else ""
@@ -934,17 +668,8 @@ class DeepSearchEngine:
             f"{user_sources_text}\n\n"
             f"=== КОНТУР 2: ВНЕШНИЕ АВТОРИТЕТНЫЕ ИСТОЧНИКИ (Web, открытые медиа, профильные ресурсы) ===\n"
             f"{web_sources_text}\n\n"
-        )
-
-        if include_darknet:
-            ai_prompt += (
-                f"=== КОНТУР 3: ТЕНЕВОЙ СЕГМЕНТ СЕТИ TOR (.ONION / DARKNET) ===\n"
-                f"{darknet_sources_text}\n\n"
-            )
-
-        ai_prompt += (
             "ИНСТРУКЦИЯ ПО ОФОРМЛЕНИЮ ОТВЕТА (ФОРМАТ OSINT-ДОСЬЕ И АНАЛИТИЧЕСКОГО СИНТЕЗА):\n"
-            "Сформируй исчерпывающий, профессиональный OSINT-ответ в HTML-формате Telegram уровня Google AI Overviews / Perplexity Pro.\n\n"
+            "Сформируй исчерпывающий, профессиональный ответ в HTML-формате Telegram уровня Google AI Overviews / Perplexity Pro.\n\n"
             "СТРУКТУРА ОТВЕТА:\n"
             "1. 🎖 <b>[ФИО персоны / Название темы / Организация] — Аналитическое досье:</b>\n"
             "   - Четкое фактологическое определение: официальный статус, организация, государственная или военная должность, роль строго по теме запроса пользователя.\n\n"
@@ -959,16 +684,11 @@ class DeepSearchEngine:
             "5. 🔗 <b>Верифицированные источники и репозитории:</b>\n"
             "   - Список источников с активными гиперссылками: <a href=\"URL\">Название статьи</a>.\n"
             "   - Если в контексте найдены репозитории GitHub — обязательно выведи каждый репозиторий: <a href=\"URL\"><b>Владелец/Репозиторий (⭐ Stars)</b></a> с кратким описанием функционала.\n\n"
-            "6. 🧅 <b>Теневой сегмент сети Tor (.onion / Darknet):</b>\n"
-            "   - Если включен контур Darknet и найдены скрытые ресурсы, выведи их строго в формате: <code>http://адрес.onion</code> с кратким пояснением найденных данных.\n"
-            "   - Если прямых утечек не обнаружено, укажи: <i>В проиндексированном теневом сегменте Tor прямых утечек по теме не зафиксировано.</i>\n"
-            "   - КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО выводить пустые угловые скобки <>, &lt;&gt; или пустые ссылки без адреса!\n\n"
             "СТРОЖАЙШИЕ ПРАВИЛА И ЗАПРЕТЫ:\n"
             "- КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО путать персоналий и приписывать чужие псевдонимы или биографии (например: «Генерал Армагеддон» — это Сергей Суровикин, генерал армии ВС РФ, он не имеет отношения к ФСБ; главой ФСБ России с 2008 года является генерал армии Александр Бортников)!\n"
-            "- КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО выдумывать фиктивные имена людей или ложные ссылки на Википедию (вроде несуществующих статей)! Ссылайся ТОЛЬКО на реальные факты и предоставленные источники.\n"
-            "- КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО заявлять, что «в интернете и мировых СМИ нет информации» о реальных известных военачальниках, политиках, исторических событиях или образцах техники! Используй предоставленные источники и свои фундаментальные экспертные знания ИИ для составления детального досье.\n"
+            "- КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО выдумывать фиктивные имена людей или ложные ссылки на Википедию! Ссылайся ТОЛЬКО на реальные факты и предоставленные источники.\n"
             "- Используй ТОЛЬКО разрешенный Telegram HTML (<b>, <i>, <code>, <blockquote>, <a href=\"...\">).\n"
-            "- КАТЕГОРИЧЕСКИ ЗАПРЕЩЕН Markdown: никаких **звездочек**, никаких ```кавычек```!\n"
+            "- КАТЕГОРИЧЕСКИ ЗАПРЕЩЕН Markdown: никаких **звездочек**, никаких кавычек в коде!\n"
             "- КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО оборачивать целые разделы, списки или пункты новостей в <blockquote> целиком! Весь текст пиши обычным текстом с <b>заголовками</b>.\n"
             "- Тег <blockquote> разрешен ИСКЛЮЧИТЕЛЬНО для коротких прямых цитат конкретных спикеров в 1-2 строки (например: <blockquote>«Цитата» — Спикер</blockquote>).\n"
             "- Категорически запрещено использовать шаблоны-заглушки вида '— @канал' или '[@канал](ссылка)'.\n"
@@ -977,10 +697,9 @@ class DeepSearchEngine:
 
         prompts = load_prompts().get("system_prompts", {})
         system_prompt = prompts.get("deep_search") or (
-            "Ты — ведущий OSINT-аналитик разведцентра «Агент Сноуден» (2026 год). "
-            "Твоя задача — проводить глубокий многоконтурный поиск информации, сопоставлять данные "
-            "из личных закрытых/отслеживаемых каналов пользователя с открытым вебом, поисковым индексом Google (Gemini Grounding) "
-            "и теневым сегментом (.onion), и выдавать безупречно структурированный, доказательный отчет с первоисточниками."
+            "Ты — ведущий аналитик разведцентра «Агент Сноуден» (2026 год). "
+            "Твоя задача — сопоставлять данные из личных закрытых/отслеживаемых каналов пользователя с открытым вебом "
+            "и поисковым индексом Google (Gemini Grounding), и выдавать безупречно структурированный, доказательный отчет с первоисточниками."
         )
 
         ai_res = await llm_router.generate_response(
@@ -995,22 +714,7 @@ class DeepSearchEngine:
 
         ai_text = ai_res.get("content", "").strip() if ai_res.get("success") else ""
         if not ai_text:
-            # Резервный формат если ИИ временно недоступен
-            ai_text = self._build_fallback_summary(clean_query, user_sources, web_sources, darknet_sources, include_darknet, web_query=web_query)
-
-        # Гарантированное отображение найденных .onion источников в отчете
-        if include_darknet and darknet_sources:
-            has_onion_urls = any(it.get("url") and it.get("url") in ai_text for it in darknet_sources)
-            if not has_onion_urls or "&lt;&gt;" in ai_text or "<>" in ai_text:
-                dark_lines = ["\n\n🧅 <b>Теневой сегмент сети Tor (.onion / Darknet):</b>"]
-                for it in darknet_sources[:4]:
-                    tit = html.escape(it.get("title", "Скрытый сервис"))
-                    snip = html.escape(it.get("snippet", ""))
-                    url = it.get("url", "")
-                    badge = html.escape(it.get("trust_badge", "🧅 [Onion]"))
-                    warn = f"\n⚠️ <i>{html.escape(it.get('trust_warning'))}</i>" if it.get("trust_warning") else ""
-                    dark_lines.append(f"• {badge} <b>{tit}</b>\n<code>{url}</code>{warn}" + (f"\n<blockquote>{snip[:250]}</blockquote>" if snip else ""))
-                ai_text += "\n".join(dark_lines)
+            ai_text = self._build_fallback_summary(clean_query, user_sources, web_sources, web_query=web_query)
 
         if search_banner and not ai_text.startswith("🌐 <b>Поиск в сети:"):
             ai_text = search_banner + ai_text
@@ -1020,9 +724,7 @@ class DeepSearchEngine:
             "text": ai_text,
             "user_sources": user_sources,
             "web_sources": web_sources,
-            "darknet_sources": darknet_sources,
-            "include_darknet": include_darknet,
-            "total_found": len(user_sources) + len(web_sources) + len(darknet_sources)
+            "total_found": len(user_sources) + len(web_sources)
         }
 
     def _build_fallback_summary(
@@ -1030,17 +732,14 @@ class DeepSearchEngine:
         query: str,
         user_sources: List[Dict[str, Any]],
         web_sources: List[Dict[str, Any]],
-        darknet_sources: List[Dict[str, Any]],
-        include_darknet: bool,
         web_query: Optional[str] = None
     ) -> str:
         """Резервный структурированный генератор если нейросеть недоступна"""
-        lines = []
+        lines_out = []
         if web_query and web_query != query:
-            lines.append(f"🌐 <b>Поиск в сети:</b> <code>{html.escape(web_query)}</code>\n")
-        lines.append(f"🔍 <b>Аналитическое досье по запросу:</b> <i>«{html.escape(query)}»</i>\n")
+            lines_out.append(f"🌐 <b>Поиск в сети:</b> <code>{html.escape(web_query)}</code>\n")
+        lines_out.append(f"🔍 <b>Аналитическое досье по запросу:</b> <i>«{html.escape(query)}»</i>\n")
 
-        # Если среди найденных источников есть Википедия или энциклопедическая справка — выводим фактологическое досье
         wiki_items = [it for it in web_sources if "википед" in it.get("title", "").lower()]
         other_web = [it for it in web_sources if it not in wiki_items]
 
@@ -1049,11 +748,11 @@ class DeepSearchEngine:
             w_tit = html.escape(w.get("title", ""))
             w_snip = html.escape(w.get("snippet", ""))
             w_url = w.get("url", "")
-            lines.append("🎖 <b>Фактологическая справка:</b>")
-            lines.append(f"<a href=\"{w_url}\"><b>{w_tit}</b></a>\n<blockquote>{w_snip}</blockquote>\n")
+            lines_out.append("🎖 <b>Фактологическая справка:</b>")
+            lines_out.append(f"<a href=\"{w_url}\"><b>{w_tit}</b></a>\n<blockquote>{w_snip}</blockquote>\n")
 
         # 1. Каналы
-        lines.append("📱 <b>1. По данным ваших каналов и мониторинга:</b>")
+        lines_out.append("📱 <b>1. По данным ваших каналов и мониторинга:</b>")
         if user_sources:
             for it in user_sources:
                 ch = html.escape(it.get("channel", "Канал"))
@@ -1062,12 +761,12 @@ class DeepSearchEngine:
                 cnt = html.escape(it.get("content", "")[:250])
                 url = it.get("url", "")
                 link_html = f' — <a href="{url}">Перейти к посту</a>' if url else ""
-                lines.append(f"• <b>[{ch}]</b> {f'({pub})' if pub else ''}: {tit}\n<blockquote>{cnt}...</blockquote>{link_html}\n")
+                lines_out.append(f"• <b>[{ch}]</b> {f'({pub})' if pub else ''}: {tit}\n<blockquote>{cnt}...</blockquote>{link_html}\n")
         else:
-            lines.append("<i>В недавних публикациях подключенных Telegram-каналов прямых упоминаний не зафиксировано.</i>\n")
+            lines_out.append("<i>В недавних публикациях подключенных Telegram-каналов прямых упоминаний не зафиксировано.</i>\n")
 
         # 2. Web
-        lines.append("🌐 <b>2. Внешние авторитетные источники и пресса (Web):</b>")
+        lines_out.append("🌐 <b>2. Внешние авторитетные источники и пресса (Web):</b>")
         display_web = (wiki_items[1:] + other_web) if wiki_items else web_sources
         if display_web:
             for it in display_web:
@@ -1075,22 +774,8 @@ class DeepSearchEngine:
                 snip = html.escape(it.get("snippet", ""))
                 url = it.get("url", "")
                 badge = html.escape(it.get("trust_badge", "🌐 [Web]"))
-                lines.append(f"• {badge} <a href=\"{url}\"><b>{tit}</b></a>\n<blockquote>{snip}</blockquote>\n")
+                lines_out.append(f"• {badge} <a href=\"{url}\"><b>{tit}</b></a>\n<blockquote>{snip}</blockquote>\n")
         else:
-            lines.append("<i>Открытый веб-поиск не вернул прямых релевантных страниц.</i>\n")
+            lines_out.append("<i>Открытый веб-поиск не вернул прямых релевантных страниц.</i>\n")
 
-        # 3. Darknet
-        if include_darknet:
-            lines.append("🧅 <b>3. Теневой сегмент (.onion / Darknet):</b>")
-            if darknet_sources:
-                for it in darknet_sources:
-                    tit = html.escape(it.get("title", ""))
-                    snip = html.escape(it.get("snippet", ""))
-                    url = it.get("url", "")
-                    badge = html.escape(it.get("trust_badge", "🧅 [Onion]"))
-                    warn = f"\n⚠️ <i>{html.escape(it.get('trust_warning'))}</i>" if it.get("trust_warning") else ""
-                    lines.append(f"• {badge} <b>{tit}</b>\n<code>{url}</code>{warn}\n<blockquote>{snip}</blockquote>\n")
-            else:
-                lines.append("<i>Сигналов и утечек в проиндексированном сегменте Tor не зафиксировано.</i>\n")
-
-        return "\n".join(lines)
+        return "\n".join(lines_out)

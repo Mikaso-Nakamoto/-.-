@@ -25,12 +25,11 @@ async def test_intent_router():
     assert r2["action"] == "deep_search", f"Expected deep_search, got {r2['action']}"
     print(f"✓ Factual lawsuit inquiry routed to deep_search: action={r2['action']}, query='{r2['clean_query']}'")
 
-    print("\n=== TEST 3: Darknet & Leak Query -> Deep Search with Darknet Flag ===")
-    q3 = "пробей по даркнету последние сливы баз данных BreachForums"
+    print("\n=== TEST 3: Network Search Query -> Deep Search ===")
+    q3 = "найди в интернете информацию о новых модификациях дрона Герань-3"
     r3 = await router.classify(q3)
     assert r3["action"] == "deep_search", f"Expected deep_search, got {r3['action']}"
-    assert r3["include_darknet"] is True, "Darknet flag should be True"
-    print(f"✓ Darknet inquiry correctly detected: action={r3['action']}, darknet={r3['include_darknet']}")
+    print(f"✓ Network search correctly routed: action={r3['action']}, query='{r3['clean_query']}'")
 
     print("\n=== TEST 4: Status and Diagnostics Query ===")
     q4 = "как там сервер, в строю ли бот и видит ли LM Studio видеокарту?"

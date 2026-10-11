@@ -8,44 +8,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.pipeline.storage import Storage
 from src.pipeline.deep_search import DeepSearchEngine
-from src.llm.router import LLMRouter
-from src.config import load_app_config
 
 async def test_deep_search_flow():
-    print("=== TEST 1: Storage Darknet Setting Toggle ===")
+    print("=== TEST 1: DeepSearchEngine User Sources Priority ===")
     storage = Storage(":memory:")
-    assert not storage.is_darknet_search_enabled(), "Default darknet search should be False"
-    storage.set_darknet_search(True)
-    assert storage.is_darknet_search_enabled(), "Darknet search should be True after toggle"
-    storage.set_darknet_search(False)
-    assert not storage.is_darknet_search_enabled(), "Darknet search should be False after toggle"
-    print("✓ Storage Darknet toggle works properly.")
-
-    print("\n=== TEST 2: DeepSearchEngine Parsing of Ahmia Onion results ===")
     engine = DeepSearchEngine()
-    dummy_ahmia_html = """
-    <ol class="searchResults">
-        <li class="result">
-            <h4><a href="/search/redirect?redirect_url=http://breach4xfkdlsms.onion/threads/129">BreachForums Database Leaks</a></h4>
-            <p>Database leak discussion and sample credentials dump.</p>
-            <cite>http://breach4xfkdlsms.onion</cite>
-        </li>
-        <li class="result">
-            <h4><a href="http://darkforum789xyz.onion/post/55">Exploit Zero-Day Archive</a></h4>
-            <p>Analysis of Linux SSH vulnerabilities and mitigation scripts.</p>
-            <cite>http://darkforum789xyz.onion</cite>
-        </li>
-    </ol>
-    """
-    parsed = engine._parse_ahmia_results(dummy_ahmia_html, limit=2)
-    assert len(parsed) == 2, f"Expected 2 results, got {len(parsed)}"
-    assert "breach4xfkdlsms.onion" in parsed[0]["url"]
-    assert "BreachForums" in parsed[0]["title"]
-    assert "darkforum789xyz.onion" in parsed[1]["url"]
-    print("✓ Ahmia onion result parsing works properly.")
 
-    print("\n=== TEST 3: DeepSearchEngine User Sources Priority ===")
-    # Insert test items in storage
     storage.save_news_items([
         {
             "channel": "medvedev_telegram",
@@ -68,21 +36,19 @@ async def test_deep_search_flow():
     assert user_sources[0]["channel"] == "medvedev_telegram"
     print(f"✓ Found user source prioritized: [{user_sources[0]['channel']}] {user_sources[0]['title']}")
 
-    print("\n=== TEST 4: Fallback Summary Generation (Without live LLM) ===")
+    print("\n=== TEST 2: Fallback Summary Generation (Without live LLM) ===")
     summary = engine._build_fallback_summary(
         query="ядерное сдерживание",
         user_sources=user_sources,
         web_sources=[{"title": "Reuters: Security Analysis", "url": "https://reuters.com/news/1", "snippet": "Global discussion on deterrence."}],
-        darknet_sources=[{"title": "Hidden Forum Thread", "url": "http://hiddenxyz.onion", "snippet": "Geopolitics thread"}],
-        include_darknet=True
+        web_query="ядерное сдерживание"
     )
     assert "По данным ваших каналов и мониторинга" in summary
     assert "Внешние авторитетные источники" in summary
-    assert "Теневой сегмент (.onion / Darknet)" in summary
     assert "https://t.me/medvedev_telegram/501" in summary
     print("✓ Fallback multi-contour summary generated cleanly with correct sections.")
 
-    print("\n=== TEST 4B: Fallback Summary with Wikipedia Encyclopedic Dossier ===")
+    print("\n=== TEST 3: Fallback Summary with Wikipedia Encyclopedic Dossier ===")
     wiki_summary = engine._build_fallback_summary(
         query="Генерал Суровикин",
         user_sources=[],
@@ -99,16 +65,14 @@ async def test_deep_search_flow():
                 "snippet": "Служебная командировка в Алжир завершена.",
                 "trust_badge": "🌐 [TOPNews.RU]"
             }
-        ],
-        darknet_sources=[],
-        include_darknet=False
+        ]
     )
     assert "Фактологическая справка:" in wiki_summary
     assert "Суровикин, Сергей Владимирович" in wiki_summary
     assert "TOPNews.RU" in wiki_summary
     print("✓ Wikipedia encyclopedic dossier successfully generated in fallback mode.")
 
-    print("\n=== TEST 5: Conversational Query Cleaning and Channel Extraction ===")
+    print("\n=== TEST 4: Conversational Query Cleaning and Channel Extraction ===")
     from src.pipeline.semantic_search import SemanticSearchEngine
     sem_engine = SemanticSearchEngine()
     test_q = 'в каком-то посте в Военной сводке или в Осведомителе вроде был пост про то, что русские подменяют картинку на украинских устройствах обнаружения дронов "Чуйка" на лягушку вместо видео с камеры русского дрона. Найди мне этот пост в канале и дай его сюда или скинь на него ссылку'

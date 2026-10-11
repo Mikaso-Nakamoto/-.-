@@ -460,14 +460,6 @@ class Storage:
     def set_chat_mode(self, active: bool):
         self.set_setting("chat_mode_active", "true" if active else "false")
 
-    def is_darknet_search_enabled(self) -> bool:
-        """Включен ли поиск в скрытом сегменте сети Tor (.onion / Darknet)"""
-        return self.get_setting("darknet_search_enabled", "false") == "true"
-
-    def set_darknet_search(self, enabled: bool):
-        """Переключает тумблер поиска в Darknet (.onion)"""
-        self.set_setting("darknet_search_enabled", "true" if enabled else "false")
-
     def is_google_ai_search_enabled(self) -> bool:
         """Включен ли поиск через Google 'Режим ИИ' (Gemini Search Grounding)"""
         return self.get_setting("google_ai_search_enabled", "true") == "true"
