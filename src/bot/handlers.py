@@ -952,12 +952,14 @@ def build_snowden_menu_text(
         text = (
             "🔍 <b>Центр поиска и OSINT-разведки («Агент Сноуден»):</b>\n\n"
             "<b>Сноуден одновременно опрашивает 3 контура:</b>\n"
-            "1. 📱 <b>Ваши источники</b> — подключенные Telegram-каналы и RSS.\n"
-            f"2. 🌐 <b>Внешний Web</b> (Google AI Grounding: {google_status}) — мировые СМИ, профильные порталы, базы эксплойтов.\n"
+            "1. 📱 <b>Ваши источники</b> — подключенные Telegram-каналы и RSS с приоритетным ранжированием.\n"
+            f"2. 🌐 <b>Внешний Web</b> (Google AI Grounding: {google_status}) — мировые СМИ, профильные порталы, Википедия.\n"
             f"3. 🧅 <b>Теневой сегмент (.onion / Darknet)</b> — {dark_status}\n\n"
-            "<b>Как пользоваться:</b>\n"
-            "• Просто напишите в чат любой вопрос или тему (ИИ сам выполнит поиск и подготовит отчет).\n"
-            "• Либо используйте команды <code>/search &lt;тема&gt;</code> или <code>/find &lt;пост&gt;</code>."
+            "<b>Инструменты OSINT:</b>\n"
+            "• <code>/osint &lt;домен | IP | ник | CVE | криптокошелек&gt;</code> — автономная техническая разведка\n"
+            "• <code>/osint tools</code> — каталог специализированных инструментов OSINT Framework\n"
+            "• <code>/find &lt;пост&gt;</code> — быстрый поиск постов в архиве каналов\n"
+            "• Либо просто отправьте любой запрос в чат — ИИ автоматически выберет инструмент."
         )
         await safe_edit_text(call, text, get_search_settings_keyboard(is_darknet, is_google))
 
@@ -1060,6 +1062,63 @@ def build_snowden_menu_text(
             )
 
         await send_safe_reply(msg, "\n".join(out_lines))
+
+    # --------------------------------------------------------------------------
+    # Автономный комплекс OSINT-разведки (по стандартам OSINT Framework): /osint <цель>
+    # --------------------------------------------------------------------------
+    @r.message(Command("osint"))
+    async def cmd_osint(msg: Message):
+        user_id = msg.from_user.id
+        if not is_admin(user_id):
+            return
+
+        target = msg.text.partition(" ")[2].strip()
+        from src.pipeline.osint_toolkit import OSINTToolkit
+        toolkit = OSINTToolkit()
+
+        if not target or target.lower() in ["help", "tools", "помощь"]:
+            catalog = toolkit.get_framework_tools()
+            lines = [
+                "🛡 <b>Автономный комплекс OSINT-разведки («Агент Сноуден»):</b>\n",
+                "<b>Использование:</b>",
+                "• <code>/osint &lt;домен&gt;</code> — DNS, RDAP, субдомены crt.sh, HTTP-стек, Wayback",
+                "• <code>/osint &lt;IP-адрес&gt;</code> — GeoIP, провайдер, ASN, reverse DNS, проверка портов",
+                "• <code>/osint &lt;никнейм&gt;</code> — многоплатформенный поиск цифрового следа (Sherlock-style)",
+                "• <code>/osint &lt;CVE-ID&gt;</code> — оценка критичности CVSS и ссылки на эксплойты",
+                "• <code>/osint &lt;криптокошелек&gt;</code> — проверка блокчейна (BTC, ETH, TRC20)",
+                "• <code>/osint tools &lt;категория&gt;</code> — каталог инструментов OSINT Framework\n",
+                "<b>Категории инструментов OSINT Framework:</b>"
+            ]
+            for cat in catalog:
+                lines.append(f"• <b>{cat['category']}:</b> {len(cat['tools'])} инструментов")
+            await send_safe_reply(msg, "\n".join(lines))
+            return
+
+        # Если запросили инструменты определенной категории
+        if target.lower().startswith("tools"):
+            subcat = target[5:].strip()
+            cats = toolkit.get_framework_tools(subcat or None)
+            lines = [f"🛠 <b>Инструменты OSINT Framework ({subcat or 'Все'}):</b>\n"]
+            for c in cats:
+                lines.append(f"📁 <b>{c['category']}:</b>")
+                for t in c["tools"]:
+                    lines.append(f"• <a href=\"{t['url']}\"><b>{t['name']}</b></a>: {t['desc']}")
+                lines.append("")
+            await send_safe_reply(msg, "\n".join(lines))
+            return
+
+        status_msg = await msg.answer(f"🛡 <b>Запуск автономной OSINT-разведки:</b> <code>{html.escape(target)}</code>\n<i>Опрашиваю реестры, порты, DNS и базы...</i>", parse_mode="HTML")
+        try:
+            raw_data = await toolkit.investigate(target)
+            report_html = await toolkit.synthesize_report(target, raw_data, llm_router=llm_router)
+            try:
+                await status_msg.delete()
+            except Exception:
+                pass
+            await send_safe_reply(msg, report_html)
+        except Exception as e:
+            logger.error(f"Ошибка OSINT команды: {e}")
+            await send_safe_reply(msg, f"⚠️ <b>Ошибка при проведении OSINT:</b> <code>{html.escape(str(e))}</code>")
 
     # --------------------------------------------------------------------------
     # Тумблер тестового режима (не сохранять в БД во время тестов): /test_mode или /testmode
@@ -1708,6 +1767,24 @@ def build_snowden_menu_text(
                 refresh_collector_func=refresh_func
             )
             await send_safe_reply(msg, result["text"], reply_markup=get_search_result_keyboard(is_darknet, is_google))
+            return
+
+        # 2B. ДЕЙСТВИЕ: osint (техническая разведка по домену, IP, никнейму, CVE, криптокошельку или OSINT Framework)
+        if action == "osint":
+            status_msg = await msg.answer(f"🛡 <b>Запуск автономной OSINT-разведки:</b> <code>{html.escape(clean_q)}</code>\n<i>Опрашиваю реестры, порты, DNS и базы данных...</i>", parse_mode="HTML")
+            try:
+                from src.pipeline.osint_toolkit import OSINTToolkit
+                toolkit = OSINTToolkit()
+                raw_data = await toolkit.investigate(clean_q)
+                report_html = await toolkit.synthesize_report(clean_q, raw_data, llm_router=llm_router)
+                try:
+                    await status_msg.delete()
+                except Exception:
+                    pass
+                await send_safe_reply(msg, report_html)
+            except Exception as e:
+                logger.error(f"Ошибка OSINT через AI Router: {e}")
+                await send_safe_reply(msg, f"⚠️ <b>Ошибка при проведении OSINT:</b> <code>{html.escape(str(e))}</code>")
             return
 
         # 3. ДЕЙСТВИЕ: digest (генерация сводки новостей по запросу)

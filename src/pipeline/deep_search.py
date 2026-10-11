@@ -749,13 +749,14 @@ class DeepSearchEngine:
             target_channels=target_channels,
             specific_entities=specific_entities
         )
-        web_query = search_queries[0] if search_queries else search_core
+        web_query = search_queries[1] if (len(search_queries) > 1 and len(search_queries[1]) > len(search_queries[0])) else (search_queries[0] if search_queries else search_core)
+        fallback_queries = [q for q in search_queries if q != web_query]
         web_sources_task = self.search_web(
             web_query,
             limit=4,
             use_google_ai=use_google_ai,
             llm_router=llm_router,
-            fallback_queries=search_queries[1:3]
+            fallback_queries=fallback_queries
         )
         darknet_task = self.search_darknet(search_core, limit=4) if include_darknet else None
 
@@ -879,10 +880,17 @@ class DeepSearchEngine:
             override_system_prompt=system_prompt
         )
 
+        search_banner = ""
+        if web_query and web_query != clean_query:
+            search_banner = f"🌐 <b>Поиск в сети:</b> <code>{html.escape(web_query)}</code>\n\n"
+
         ai_text = ai_res.get("content", "").strip() if ai_res.get("success") else ""
         if not ai_text:
             # Резервный формат если ИИ временно недоступен
-            ai_text = self._build_fallback_summary(clean_query, user_sources, web_sources, darknet_sources, include_darknet)
+            ai_text = self._build_fallback_summary(clean_query, user_sources, web_sources, darknet_sources, include_darknet, web_query=web_query)
+
+        if search_banner and not ai_text.startswith("🌐 <b>Поиск в сети:"):
+            ai_text = search_banner + ai_text
 
         return {
             "query": clean_query,
@@ -900,10 +908,14 @@ class DeepSearchEngine:
         user_sources: List[Dict[str, Any]],
         web_sources: List[Dict[str, Any]],
         darknet_sources: List[Dict[str, Any]],
-        include_darknet: bool
+        include_darknet: bool,
+        web_query: Optional[str] = None
     ) -> str:
         """Резервный структурированный генератор если нейросеть недоступна"""
-        lines = [f"🔍 <b>Аналитическое досье по запросу:</b> <i>«{html.escape(query)}»</i>\n"]
+        lines = []
+        if web_query and web_query != query:
+            lines.append(f"🌐 <b>Поиск в сети:</b> <code>{html.escape(web_query)}</code>\n")
+        lines.append(f"🔍 <b>Аналитическое досье по запросу:</b> <i>«{html.escape(query)}»</i>\n")
 
         # Если среди найденных источников есть Википедия или энциклопедическая справка — выводим фактологическое досье
         wiki_items = [it for it in web_sources if "википед" in it.get("title", "").lower()]
