@@ -63,7 +63,7 @@ class DigestBuilder:
 
         key_channel_names = {
             "ross_name", "dyadyabatya0", "rybar", "rostov_tsargrad",
-            "voennaja_svodka", "infomil_live",
+            "voennaja_svodka", "infomil_live", "medvedev_telegram",
             "it_shelter", "github_radar", "cyberpolice_rus", "xakep_ru"
         }
 
@@ -137,7 +137,7 @@ class DigestBuilder:
 
         if tg_channels:
             tg_collector = TelegramWebCollector(tg_channels)
-            tg_items = await tg_collector.fetch_all(limit_per_channel=20)
+            tg_items = await tg_collector.fetch_all(limit_per_channel=40)
             all_items.extend(tg_items)
 
         if rss_feeds:

@@ -232,6 +232,21 @@ class Storage:
                 (h, "youtube_ross", "@ross_name", video_url)
             )
 
+    def is_medvedev_post_seen(self, post_url: str) -> bool:
+        """Проверяет, было ли уже отправлено уведомление о посте Медведева"""
+        with self._get_connection() as conn:
+            cur = conn.execute("SELECT 1 FROM seen_items WHERE url = ?", (post_url,))
+            return cur.fetchone() is not None
+
+    def mark_medvedev_post_seen(self, post_url: str):
+        """Фиксирует отправленный пост Медведева во избежание дублей"""
+        with self._get_connection() as conn:
+            h = hashlib.sha256(post_url.encode("utf-8")).hexdigest()
+            conn.execute(
+                "INSERT OR IGNORE INTO seen_items (item_hash, source_type, channel, url) VALUES (?, ?, ?, ?)",
+                (h, "telegram_medvedev", "@medvedev_telegram", post_url)
+            )
+
     def get_news_feed(self, limit: int = 60) -> List[Dict[str, Any]]:
         with self._get_connection() as conn:
             cur = conn.execute(

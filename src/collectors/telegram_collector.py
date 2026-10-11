@@ -103,6 +103,21 @@ class TelegramWebCollector:
             soup = BeautifulSoup(resp.text, "html.parser")
             messages = soup.find_all("div", class_="tgme_widget_message_wrap")
 
+            # Пагинация ?before= для сбора более глубокой истории публикаций (до 40-50 постов)
+            if limit > 20 and messages:
+                first_msg = messages[0].find("div", class_="tgme_widget_message")
+                if first_msg and first_msg.get("data-post"):
+                    first_id = first_msg.get("data-post").split("/")[-1]
+                    try:
+                        p2_url = f"https://t.me/s/{target_user}?before={first_id}"
+                        r2 = await client.get(p2_url, headers=self.headers, timeout=10.0)
+                        if r2.status_code == 200:
+                            s2 = BeautifulSoup(r2.text, "html.parser")
+                            m2 = s2.find_all("div", class_="tgme_widget_message_wrap")
+                            messages = m2 + messages
+                    except Exception as p_err:
+                        logger.debug(f"Пагинация ?before для @{username}: {p_err}")
+
             for wrap in messages[-limit:]:
                 msg_div = wrap.find("div", class_="tgme_widget_message")
                 if not msg_div:

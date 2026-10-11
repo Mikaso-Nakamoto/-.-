@@ -201,6 +201,88 @@ class DigestScheduler:
         except Exception as e:
             logger.error(f"Ошибка при проверке YouTube-видео у RossName: {e}")
 
+    async def check_medvedev_channel(self):
+        """
+        Фоновый трекер канала @medvedev_telegram (Дмитрий Медведев).
+        При появлении нового поста:
+        1. Немедленно дублирует пост пользователю с пометкой '⚡️ Дмитрий Анатольевич вещает!' и ссылкой.
+        2. Обрабатывает пост ИИ в первую очередь (главный посыл, адресат, угрозы/последствия).
+        3. Фиксирует публикацию в БД во избежание дублей.
+        """
+        target_admin = self.admin_id
+        if not target_admin:
+            saved_id = self.builder.storage.get_setting("admin_id")
+            if saved_id and saved_id.isdigit():
+                target_admin = int(saved_id)
+
+        if not target_admin:
+            return
+
+        try:
+            from src.collectors.telegram_collector import TelegramWebCollector
+            collector = TelegramWebCollector([{"username": "medvedev_telegram", "category": "Заявления & Геополитика"}])
+            items = await collector.fetch_all(limit_per_channel=5)
+
+            for it in items:
+                url = it.get("url") or ""
+                if not url:
+                    continue
+
+                if not self.builder.storage.is_medvedev_post_seen(url):
+                    logger.info(f"⚡️ Обнаружено новое заявление в канале @medvedev_telegram: {url}")
+                    self.builder.storage.mark_medvedev_post_seen(url)
+                    self.builder.storage.save_news_items([it])
+
+                    content = (it.get("content") or "").strip()
+                    title = it.get("title", "Заявление Дмитрия Медведева")
+
+                    # Экспресс-обработка поста через ИИ в первую очередь
+                    ai_analysis = ""
+                    try:
+                        ai_prompt = (
+                            f"Текст заявления Дмитрия Медведева:\n{content[:3000]}\n\n"
+                            "Сделай емкий экспресс-анализ в 2-3 предложениях на русском языке: "
+                            "каков ключевой политический посыл, кому адресован сигнал и какие прямые последствия озвучены."
+                        )
+                        res = await self.builder.router.generate_response(
+                            task="chat",
+                            user_prompt=ai_prompt,
+                            override_system_prompt="Ты высококлассный аналитик геополитики. Выдели главное зерно заявления Дмитрия Медведева без лишней воды."
+                        )
+                        if res.get("success"):
+                            ai_analysis = res.get("content", "").strip()
+                    except Exception as ai_err:
+                        logger.warning(f"ИИ-анализ поста Медведева: {ai_err}")
+
+                    msg_text = (
+                        "⚡️ <b>Дмитрий Анатольевич вещает!</b>\n\n"
+                        f"<blockquote>{html.escape(content)}</blockquote>\n\n"
+                    )
+                    if ai_analysis:
+                        msg_text += f"🧠 <b>Анализ ИИ:</b>\n<i>{html.escape(ai_analysis)}</i>\n\n"
+
+                    msg_text += f"🔗 <a href=\"{url}\">Оригинальный пост в канале @medvedev_telegram</a>"
+
+                    photo_file = None
+                    if it.get("image_url"):
+                        photo_file = await download_image_as_input_file(it["image_url"])
+
+                    from src.bot.handlers import split_telegram_html
+                    chunks = split_telegram_html(msg_text, max_chunk=3800)
+
+                    if photo_file and len(chunks) == 1 and len(chunks[0]) <= 1024:
+                        await self.bot.send_photo(target_admin, photo=photo_file, caption=chunks[0], parse_mode="HTML")
+                    else:
+                        if photo_file:
+                            try:
+                                await self.bot.send_photo(target_admin, photo=photo_file)
+                            except Exception:
+                                pass
+                        for chunk in chunks:
+                            await self.bot.send_message(target_admin, chunk, parse_mode="HTML")
+        except Exception as e:
+            logger.error(f"Ошибка в трекере @medvedev_telegram: {e}")
+
     def get_next_run_time(self) -> str:
         job = self.scheduler.get_job("morning_digest")
         if job and job.next_run_time:
@@ -223,6 +305,14 @@ class DigestScheduler:
             'interval',
             minutes=10,
             id='ross_name_youtube_tracker'
+        )
+
+        # Фоновый мониторинг публикаций Дмитрия Медведева (каждые 3 минуты)
+        self.scheduler.add_job(
+            self.check_medvedev_channel,
+            'interval',
+            minutes=3,
+            id='medvedev_telegram_tracker'
         )
 
         self.scheduler.start()

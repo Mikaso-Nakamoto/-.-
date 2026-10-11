@@ -35,6 +35,7 @@ BOT_COMMANDS = [
     BotCommand(command="add_rss", description="➕ Добавить RSS-ленту"),
     BotCommand(command="del_source", description="🗑 Удалить источник"),
     BotCommand(command="refresh", description="🔄 Собрать свежие новости сейчас"),
+    BotCommand(command="find", description="🔍 Найти пост в каналах по описанию"),
     BotCommand(command="test_mode", description="🧪 Переключить тестовый режим"),
     BotCommand(command="clearnews", description="🧹 Очистить базу новостей и дайджестов"),
     BotCommand(command="help", description="ℹ️ Инструкция и справка по командам"),
@@ -728,6 +729,54 @@ def build_snowden_menu_text(
             await wait_msg.edit_text(f"⚠️ Ошибка при сборе публикаций: {e}", parse_mode="HTML")
 
     # --------------------------------------------------------------------------
+    # Поиск постов в каналах по описанию: /find <текст> или /search <текст>
+    # --------------------------------------------------------------------------
+    @r.message(Command("find", "search"))
+    async def cmd_find_post(msg: Message):
+        user_id = msg.from_user.id
+        if not is_admin(user_id):
+            return
+
+        query = msg.text.partition(" ")[2].strip()
+        if not query:
+            await send_safe_reply(
+                msg,
+                "🔍 <b>Поиск по описанию постов в Telegram-каналах:</b>\n\n"
+                "Использование:\n"
+                "<code>/find &lt;описание поста, ключевые слова, тема&gt;</code>\n\n"
+                "Примеры:\n"
+                "• <code>/find подмена видео на лягушку в устройстве Чуйка</code>\n"
+                "• <code>/find атака на нефтеналивной терминал в Ростове</code>\n"
+                "• <code>/find бесплатная замена Adobe Photoshop на GitHub</code>"
+            )
+            return
+
+        await msg.bot.send_chat_action(msg.chat.id, "typing")
+        all_candidates = storage.get_news_feed(limit=500)
+        from src.pipeline.semantic_search import SemanticSearchEngine
+        search_engine = SemanticSearchEngine()
+        results = await search_engine.search_posts(query, all_candidates, limit=5)
+
+        if not results:
+            await send_safe_reply(msg, f"🔍 По запросу <i>«{html.escape(query)}»</i> ничего не найдено в текущей базе постов.")
+            return
+
+        out_lines = [f"🎯 <b>Найдено в каналах по запросу:</b> <i>«{html.escape(query)}»</i>\n"]
+        for i, it in enumerate(results, 1):
+            ch = it.get("channel", "Канал")
+            pub = (it.get("published_at") or "")[:10]
+            url = it.get("url", "")
+            title = it.get("title", "")
+            content = (it.get("content", "") or "")[:280].strip()
+            out_lines.append(
+                f"<b>{i}. {ch}</b> {f'({pub})' if pub else ''}\n"
+                f"<blockquote>{html.escape(content)}...</blockquote>\n"
+                f"🔗 <a href=\"{url}\">Перейти к публикации</a>\n"
+            )
+
+        await send_safe_reply(msg, "\n".join(out_lines))
+
+    # --------------------------------------------------------------------------
     # Тумблер тестового режима (не сохранять в БД во время тестов): /test_mode или /testmode
     # --------------------------------------------------------------------------
     @r.message(Command("test_mode", "testmode"))
@@ -1294,6 +1343,28 @@ def build_snowden_menu_text(
         latest_digest = storage.get_latest_digest()
 
         q_lower = user_query.lower()
+
+        # Если пользователь просит найти конкретный пост или дать ссылку на публикацию:
+        if any(trigger in q_lower for trigger in ["найди пост", "найди мне этот пост", "найди в канале", "скинь ссылку на пост", "дай ссылку на пост"]):
+            all_candidates = storage.get_news_feed(limit=500)
+            from src.pipeline.semantic_search import SemanticSearchEngine
+            search_engine = SemanticSearchEngine()
+            results = await search_engine.search_posts(user_query, all_candidates, limit=4)
+            if results:
+                out_lines = [f"🎯 <b>Нашел подходящие публикации в каналах:</b>\n"]
+                for i, it in enumerate(results, 1):
+                    ch = it.get("channel", "Канал")
+                    pub = (it.get("published_at") or "")[:10]
+                    url = it.get("url", "")
+                    content = (it.get("content", "") or "")[:280].strip()
+                    out_lines.append(
+                        f"<b>{i}. {ch}</b> {f'({pub})' if pub else ''}\n"
+                        f"<blockquote>{html.escape(content)}...</blockquote>\n"
+                        f"🔗 <a href=\"{url}\">Перейти к публикации</a>\n"
+                    )
+                await send_safe_reply(msg, "\n".join(out_lines), reply_markup=get_chat_control_keyboard())
+                return
+
         is_news_inquiry = any(w in q_lower for w in [
             "новост", "украин", "сво", "фронт", "трамп", "войн", "политик",
             "росс", "дядя батя", "рыбар", "сводк", "ситуаци", "что произошло", "что слышно",
