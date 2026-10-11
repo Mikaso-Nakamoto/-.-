@@ -50,6 +50,12 @@ async def test_intent_router():
     assert r6["action"] == "chat", f"Expected chat, got {r6['action']}"
     print(f"✓ Conversational request correctly routed to chat: action={r6['action']}")
 
+    print("\n=== TEST 7: Frontline Map / Military Summary ===")
+    q7 = "покажи карту сво military summary"
+    r7 = await router.classify(q7)
+    assert r7["action"] == "frontline_map", f"Expected frontline_map, got {r7['action']}"
+    print(f"✓ Frontline map inquiry correctly routed: action={r7['action']}")
+
     print("\n=== ALL INTENT ROUTER TESTS PASSED ===")
 
 if __name__ == "__main__":

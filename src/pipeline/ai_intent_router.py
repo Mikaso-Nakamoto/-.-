@@ -93,29 +93,22 @@ class AIIntentRouter:
                 "reason": "Запрос поиска конкретной публикации в каналах"
             }
 
-        # 4. Явная команда или прямой запрос OSINT-разведки (по стандартам OSINT Framework)
-        osint_cmd = re.search(r'(?i)^(?:/osint|osint:?|whois:?|пробей\s+(?:ip|домен|ник|хэндл|аккаунт|кошелек|cve))\s+(.+)$', raw)
-        if osint_cmd:
+        # 4. Запрос интерактивной карты СВО / Military Summary
+        map_triggers = [
+            r'^(?:/map|/frontline|/militarysummary)\b',
+            r'\b(?:military\s*summary|militarysummary\.com)\b',
+            r'\b(?:карт[аеу]\s+(?:сво|боев|фронт|военн))\b',
+            r'\b(?:лини[яиею]\s+(?:фронт|соприкосновен))\b',
+            r'\b(?:где\s+сейчас\s+фронт|покажи\s+карту)\b'
+        ]
+        if any(re.search(pat, q_low) for pat in map_triggers):
             return {
-                "action": "osint",
-                "clean_query": osint_cmd.group(1).strip(),
-                "target_channels": [],
+                "action": "frontline_map",
+                "clean_query": raw,
+                "target_channels": ["militarysummaryru"],
                 "include_darknet": False,
                 "confidence": 0.98,
-                "reason": "Явный запрос OSINT-разведки"
-            }
-
-        # Определение чистых технических идентификаторов (IP-адрес или CVE или криптокошелек)
-        if re.match(r'^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$', raw) or \
-           re.match(r'^CVE-\d{4}-\d+$', raw, re.IGNORECASE) or \
-           re.match(r'^(?:0x[a-fA-F0-9]{40}|(?:1|3|bc1)[a-zA-HJ-NP-Z0-9]{25,59}|T[A-Za-z1-9]{33})$', raw):
-            return {
-                "action": "osint",
-                "clean_query": raw,
-                "target_channels": [],
-                "include_darknet": False,
-                "confidence": 0.99,
-                "reason": "Обнаружен прямой технический идентификатор OSINT (IP/CVE/Crypto)"
+                "reason": "Запрос интерактивной карты СВО / Military Summary"
             }
 
         # 5. Явный запрос глубокого поиска / разведки / даркнета
@@ -169,7 +162,7 @@ class AIIntentRouter:
                     "СТРОГИЕ ПРАВИЛА ВЫХОДА:\n"
                     "Отвечай ИСКЛЮЧИТЕЛЬНО валидным JSON-объектом без лишнего текста, без кавычек ```json:\n"
                     "{\n"
-                    '  "action": "find_post" | "deep_search" | "osint" | "digest" | "status" | "chat",\n'
+                    '  "action": "find_post" | "deep_search" | "frontline_map" | "digest" | "status" | "chat",\n'
                     '  "clean_query": "краткая фактологическая суть запроса для поисковика",\n'
                     '  "target_channels": ["список упомянутых юзернеймов каналов или []"],\n'
                     '  "include_darknet": true/false (true если запрос касается уязвимостей, 0-day, хакеров, утечек баз данных или сети Tor)\n'
@@ -189,7 +182,7 @@ class AIIntentRouter:
                     if m:
                         data = json.loads(m.group(0))
                         action = data.get("action", "chat")
-                        if action in ["find_post", "deep_search", "osint", "digest", "status", "chat"]:
+                        if action in ["find_post", "deep_search", "frontline_map", "digest", "status", "chat"]:
                             clean_q = data.get("clean_query") or raw
                             channels = data.get("target_channels") or []
                             darknet = bool(data.get("include_darknet", False))

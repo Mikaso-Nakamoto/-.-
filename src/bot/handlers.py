@@ -429,6 +429,8 @@ def build_snowden_menu_text(
             "• <code>/chat</code> — войти в режим прямого диалога со Сноуденом.\n"
             "• <code>/exit</code> — завершить диалог и вернуться к терминалу.\n"
             "• В режиме чата Сноуден опрашивает все каналы (@medvedev_telegram, @ross_name, @Dyadyabatya0, @Voennaja_svodka, @infomil_live, РИА, ТАСС), объединяет факты без дублирования в единый насыщенный абзац, цитирует первоисточники через <b>цитаты</b> и отправляет <b>реальные фото/медиа альбомы</b> с места событий!\n\n"
+            "🗺 <b>Интерактивная карта СВО (Military Summary):</b>\n"
+            "• <code>/map</code> (или <code>/frontline</code>) — оперативная обстановка по секторам ЛБС и интерактивная карта militarysummary.com\n\n"
             "⚡️ <b>Сводки и аналитика:</b>\n"
             "• <code>/digest</code> — немедленно сгенерировать утреннюю аналитическую сводку (СВО, геополитика, полезный софт, безопасность).\n"
             "• <code>/refresh</code> — запустить оперативный опрос всех каналов и обновить базу публикаций прямо сейчас.\n\n"
@@ -950,40 +952,31 @@ def build_snowden_menu_text(
         dark_status = "🟢 <b>ВКЛЮЧЕН</b>" if is_darknet else "⚪️ <b>ВЫКЛЮЧЕН</b>"
         google_status = "🟢 <b>ВКЛЮЧЕН</b>" if is_google else "⚪️ <b>ВЫКЛЮЧЕН</b>"
         text = (
-            "🔍 <b>Центр поиска и OSINT-разведки («Агент Сноуден»):</b>\n\n"
-            "<b>Сноуден одновременно опрашивает 3 контура:</b>\n"
-            "1. 📱 <b>Ваши источники</b> — подключенные Telegram-каналы и RSS с приоритетным ранжированием.\n"
-            f"2. 🌐 <b>Внешний Web</b> (Google AI Grounding: {google_status}) — мировые СМИ, профильные порталы, Википедия.\n"
+            "🔍 <b>Центр поиска («Агент Сноуден»):</b>\n\n"
+            "<b>Сноуден опрашивает ключевые контуры:</b>\n"
+            "1. 📱 <b>Ваши источники</b> — добавленные Telegram-каналы и RSS с приоритетным ранжированием.\n"
+            f"2. 🌐 <b>Внешний Web</b> (Google AI Grounding: {google_status}) — поиск в сети через облачные модели.\n"
             f"3. 🧅 <b>Теневой сегмент (.onion / Darknet)</b> — {dark_status}\n\n"
-            "<b>Инструменты OSINT:</b>\n"
-            "• <code>/osint &lt;домен | IP | ник | CVE | криптокошелек&gt;</code> — автономная техническая разведка\n"
-            "• <code>/osint tools</code> — каталог специализированных инструментов OSINT Framework\n"
-            "• <code>/find &lt;пост&gt;</code> — быстрый поиск постов в архиве каналов\n"
-            "• Либо просто отправьте любой запрос в чат — ИИ автоматически выберет инструмент."
+            "<b>Быстрые команды:</b>\n"
+            "• <code>/find &lt;текст&gt;</code> — поиск постов в добавленных Telegram-каналах\n"
+            "• <code>/search &lt;запрос&gt;</code> — сетевой поиск через облачные модели и сеть Tor\n"
+            "• <code>/map</code> — интерактивная карта СВО (militarysummary.com)\n"
+            "• Либо просто задайте любой вопрос в чате — ИИ проанализирует ваши источники!"
         )
         await safe_edit_text(call, text, get_search_settings_keyboard(is_darknet, is_google))
 
-    @r.callback_query(F.data == "btn_osint_tools")
-    async def cb_osint_tools(call: CallbackQuery):
-        from src.pipeline.osint_toolkit import OSINTToolkit
-        tk = OSINTToolkit()
-        catalog = tk.get_framework_tools()
-        lines = [
-            "🛠 <b>Интерактивный каталог инструментов OSINT Framework:</b>\n",
-            "<i>Верифицированные инструменты для глубокой разведки:</i>\n"
-        ]
-        for cat in catalog:
-            lines.append(f"📁 <b>{cat['category']}:</b>")
-            for t in cat["tools"][:4]:
-                lines.append(f"• <a href=\"{t['url']}\"><b>{t['name']}</b></a>: {t['desc']}")
-            lines.append("")
-
-        lines.append("💡 <i>Для автоматического запуска разведки на вашем ПК используйте команду:</i>\n<code>/osint &lt;домен | IP | ник | CVE | телефон | криптокошелек&gt;</code>")
-        back_kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔙 Назад к поиску", callback_data="btn_search_menu")],
-            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="btn_menu")]
-        ])
-        await safe_edit_text(call, "\n".join(lines), back_kb)
+    @r.callback_query(F.data.in_({"btn_military_summary", "btn_ms_frontline_brief", "btn_ms_refresh"}))
+    async def cb_military_summary(call: CallbackQuery):
+        await call.answer()
+        from src.pipeline.military_summary import MilitarySummaryEngine
+        ms = MilitarySummaryEngine()
+        if call.data == "btn_ms_refresh":
+            try:
+                await digest_builder.collect_fresh_news()
+            except Exception:
+                pass
+        overview = await ms.get_frontline_overview(storage, llm_router=llm_router)
+        await safe_edit_text(call, overview["text"], overview["keyboard"])
 
     # --------------------------------------------------------------------------
     # Быстрый поиск постов в архиве каналов: /find <текст>
@@ -1086,61 +1079,27 @@ def build_snowden_menu_text(
         await send_safe_reply(msg, "\n".join(out_lines))
 
     # --------------------------------------------------------------------------
-    # Автономный комплекс OSINT-разведки (по стандартам OSINT Framework): /osint <цель>
+    # Интерактивная карта СВО и сводка Military Summary: /map, /frontline, /militarysummary
     # --------------------------------------------------------------------------
-    @r.message(Command("osint"))
-    async def cmd_osint(msg: Message):
+    @r.message(Command("map", "frontline", "militarysummary"))
+    async def cmd_frontline_map(msg: Message):
         user_id = msg.from_user.id
         if not is_admin(user_id):
             return
 
-        target = msg.text.partition(" ")[2].strip()
-        from src.pipeline.osint_toolkit import OSINTToolkit
-        toolkit = OSINTToolkit()
-
-        if not target or target.lower() in ["help", "tools", "помощь"]:
-            catalog = toolkit.get_framework_tools()
-            lines = [
-                "🛡 <b>Автономный комплекс OSINT-разведки («Агент Сноуден»):</b>\n",
-                "<b>Использование:</b>",
-                "• <code>/osint &lt;домен&gt;</code> — DNS, RDAP, субдомены crt.sh, HTTP-стек, Wayback",
-                "• <code>/osint &lt;IP-адрес&gt;</code> — GeoIP, провайдер, ASN, reverse DNS, проверка портов",
-                "• <code>/osint &lt;никнейм&gt;</code> — многоплатформенный поиск цифрового следа (Sherlock-style)",
-                "• <code>/osint &lt;CVE-ID&gt;</code> — оценка критичности CVSS и ссылки на эксплойты",
-                "• <code>/osint &lt;криптокошелек&gt;</code> — проверка блокчейна (BTC, ETH, TRC20)",
-                "• <code>/osint tools &lt;категория&gt;</code> — каталог инструментов OSINT Framework\n",
-                "<b>Категории инструментов OSINT Framework:</b>"
-            ]
-            for cat in catalog:
-                lines.append(f"• <b>{cat['category']}:</b> {len(cat['tools'])} инструментов")
-            await send_safe_reply(msg, "\n".join(lines))
-            return
-
-        # Если запросили инструменты определенной категории
-        if target.lower().startswith("tools"):
-            subcat = target[5:].strip()
-            cats = toolkit.get_framework_tools(subcat or None)
-            lines = [f"🛠 <b>Инструменты OSINT Framework ({subcat or 'Все'}):</b>\n"]
-            for c in cats:
-                lines.append(f"📁 <b>{c['category']}:</b>")
-                for t in c["tools"]:
-                    lines.append(f"• <a href=\"{t['url']}\"><b>{t['name']}</b></a>: {t['desc']}")
-                lines.append("")
-            await send_safe_reply(msg, "\n".join(lines))
-            return
-
-        status_msg = await msg.answer(f"🛡 <b>Запуск автономной OSINT-разведки:</b> <code>{html.escape(target)}</code>\n<i>Опрашиваю реестры, порты, DNS и базы...</i>", parse_mode="HTML")
+        from src.pipeline.military_summary import MilitarySummaryEngine
+        ms = MilitarySummaryEngine()
+        status_msg = await msg.answer("🗺 <b>Формирую оперативную сводку фронта (Military Summary)...</b>", parse_mode="HTML")
         try:
-            raw_data = await toolkit.investigate(target)
-            report_html = await toolkit.synthesize_report(target, raw_data, llm_router=llm_router)
+            overview = await ms.get_frontline_overview(storage, llm_router=llm_router)
             try:
                 await status_msg.delete()
             except Exception:
                 pass
-            await send_safe_reply(msg, report_html)
+            await send_safe_reply(msg, overview["text"], reply_markup=overview["keyboard"])
         except Exception as e:
-            logger.error(f"Ошибка OSINT команды: {e}")
-            await send_safe_reply(msg, f"⚠️ <b>Ошибка при проведении OSINT:</b> <code>{html.escape(str(e))}</code>")
+            logger.error(f"Ошибка получения сводки карты СВО: {e}")
+            await send_safe_reply(msg, f"⚠️ Ошибка формирования карты СВО: {e}")
 
     # --------------------------------------------------------------------------
     # Тумблер тестового режима (не сохранять в БД во время тестов): /test_mode или /testmode
@@ -1791,22 +1750,21 @@ def build_snowden_menu_text(
             await send_safe_reply(msg, result["text"], reply_markup=get_search_result_keyboard(is_darknet, is_google))
             return
 
-        # 2B. ДЕЙСТВИЕ: osint (техническая разведка по домену, IP, никнейму, CVE, криптокошельку или OSINT Framework)
-        if action == "osint":
-            status_msg = await msg.answer(f"🛡 <b>Запуск автономной OSINT-разведки:</b> <code>{html.escape(clean_q)}</code>\n<i>Опрашиваю реестры, порты, DNS и базы данных...</i>", parse_mode="HTML")
+        # 2B. ДЕЙСТВИЕ: frontline_map (интерактивная карта СВО и оперативная сводка Military Summary)
+        if action == "frontline_map":
+            from src.pipeline.military_summary import MilitarySummaryEngine
+            ms = MilitarySummaryEngine()
+            status_msg = await msg.answer("🗺 <b>Формирую оперативную сводку фронта (Military Summary)...</b>", parse_mode="HTML")
             try:
-                from src.pipeline.osint_toolkit import OSINTToolkit
-                toolkit = OSINTToolkit()
-                raw_data = await toolkit.investigate(clean_q)
-                report_html = await toolkit.synthesize_report(clean_q, raw_data, llm_router=llm_router)
+                overview = await ms.get_frontline_overview(storage, llm_router=llm_router)
                 try:
                     await status_msg.delete()
                 except Exception:
                     pass
-                await send_safe_reply(msg, report_html)
+                await send_safe_reply(msg, overview["text"], reply_markup=overview["keyboard"])
             except Exception as e:
-                logger.error(f"Ошибка OSINT через AI Router: {e}")
-                await send_safe_reply(msg, f"⚠️ <b>Ошибка при проведении OSINT:</b> <code>{html.escape(str(e))}</code>")
+                logger.error(f"Ошибка карты СВО через AI Router: {e}")
+                await send_safe_reply(msg, f"⚠️ Ошибка формирования карты СВО: {e}")
             return
 
         # 3. ДЕЙСТВИЕ: digest (генерация сводки новостей по запросу)

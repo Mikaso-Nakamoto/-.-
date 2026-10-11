@@ -4,21 +4,25 @@ from src.llm.router import POPULAR_MODELS
 
 def get_main_menu_keyboard(chat_mode: bool = False, web_app_url: Optional[str] = None) -> InlineKeyboardMarkup:
     first_row = [
-        InlineKeyboardButton(text="⚡️ Аналитическая сводка", callback_data="btn_run_digest"),
-        InlineKeyboardButton(text="🔍 Поиск и OSINT", callback_data="btn_search_menu")
+        InlineKeyboardButton(text="⚡️ Сводка по источникам", callback_data="btn_run_digest"),
+        InlineKeyboardButton(text="🗺 Карта СВО (Military Summary)", callback_data="btn_military_summary")
     ]
 
     second_row = [
-        InlineKeyboardButton(text="🧠 Нейросети & Модели", callback_data="btn_select_provider"),
-        InlineKeyboardButton(text="📡 Источники разведки", callback_data="btn_sources")
+        InlineKeyboardButton(text="🔍 Поиск в сети & Tor", callback_data="btn_search_menu"),
+        InlineKeyboardButton(text="📡 Мои источники", callback_data="btn_sources")
     ]
 
     third_row = [
-        InlineKeyboardButton(text="📊 Статус контура", callback_data="btn_status"),
+        InlineKeyboardButton(text="🧠 Нейросети & Модели", callback_data="btn_select_provider"),
+        InlineKeyboardButton(text="📊 Статус контура", callback_data="btn_status")
+    ]
+
+    fourth_row = [
         InlineKeyboardButton(text="🔄 Обновить ленту", callback_data="btn_refresh_now")
     ]
 
-    rows = [first_row, second_row, third_row]
+    rows = [first_row, second_row, third_row, fourth_row]
 
     if web_app_url and str(web_app_url).strip():
         clean_url = str(web_app_url).strip()
@@ -51,7 +55,7 @@ def get_search_settings_keyboard(is_darknet: bool, is_google_ai: bool) -> Inline
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=google_label, callback_data=google_cb)],
         [InlineKeyboardButton(text=darknet_label, callback_data=darknet_cb)],
-        [InlineKeyboardButton(text="🛠 Каталог OSINT Framework", callback_data="btn_osint_tools")],
+        [InlineKeyboardButton(text="🗺 Карта СВО (Military Summary)", callback_data="btn_military_summary")],
         [InlineKeyboardButton(text="🏠 Главное меню", callback_data="btn_menu")]
     ])
 

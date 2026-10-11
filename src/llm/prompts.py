@@ -252,11 +252,54 @@ def clean_markdown_for_document(text: str) -> str:
 
     return "\n".join(fixed_lines).strip()
 
+def convert_markdown_tables_to_text(text: str) -> str:
+    """
+    Вместо грубого стирания Markdown-таблиц (что приводило к пустому телу дайджеста),
+    конвертирует строки таблицы в аккуратные пункты со структурированными полями.
+    """
+    lines = text.split('\n')
+    out_lines = []
+    headers = []
+    in_table = False
+
+    for line in lines:
+        s = line.strip()
+        if s.startswith('|') and s.endswith('|') and len(s) > 2:
+            cells = [c.strip() for c in s.strip('|').split('|')]
+            if all(re.match(r'^:?-+:?$', c) for c in cells if c):
+                continue
+            if not in_table or not headers:
+                headers = cells
+                in_table = True
+                continue
+
+            parts = []
+            for h, val in zip(headers, cells):
+                if not val or val == '-':
+                    continue
+                h_clean = re.sub(r'[*#_]+', '', h).strip()
+                val_clean = val.strip()
+                if h_clean.lower() in ['№', 'id', 'номер']:
+                    continue
+                if h_clean:
+                    parts.append(f"<b>{h_clean}:</b> {val_clean}")
+                else:
+                    parts.append(val_clean)
+            if parts:
+                out_lines.append("• " + " — ".join(parts))
+        else:
+            in_table = False
+            headers = []
+            out_lines.append(line)
+
+    return '\n'.join(out_lines)
+
+
 def extract_clean_digest_post(raw_text: str, date_str: str) -> str:
     """
     Формирует красивый, структурированный Telegram-пост из любого вывода LLM:
     - Никаких служебных меток TELEGRAM_POST, FULL_REPORT, ===.
-    - Никаких сырых Markdown-таблиц внутри сообщения (они идут в прикрепленный .md файл).
+    - Markdown-таблицы аккуратно конвертируются в читаемый список фактов.
     - Каждая новость оформляется с нативным выделением цитат <blockquote>...</blockquote>.
     - Никаких обрезок на 300 символов: полный охват ключевых событий суток.
     - Автоматическое разделение и ссылка на полный .MD документ при превышении лимита Telegram.
@@ -272,9 +315,8 @@ def extract_clean_digest_post(raw_text: str, date_str: str) -> str:
     header = f"<b>⚡️ АНАЛИТИЧЕСКИЙ ДАЙДЖЕСТ — {date_str}</b>"
     lead = "Краткий обзор ключевых событий и трендов за прошедшие сутки:"
 
-    # Удаляем сырые Markdown-таблицы (они предназначены для полного .md файла и ломают мобильный Telegram)
-    cleaned_no_tables = re.sub(r'(?m)^\s*\|.+\|\s*\n?', '', cleaned)
-    cleaned_no_tables = re.sub(r'(?m)^[\s\-\|:]+\n?', '', cleaned_no_tables).strip()
+    # Преобразуем Markdown-таблицы в аккуратный список фактов (ни в коем случае не удаляем в ноль!)
+    cleaned_no_tables = convert_markdown_tables_to_text(cleaned)
 
     # Поиск ссылок вида [1] https://...
     footnote_links = {}
@@ -326,6 +368,8 @@ def extract_clean_digest_post(raw_text: str, date_str: str) -> str:
     else:
         # Если секции не разбились — преобразуем весь очищенный от таблиц текст без обрезки!
         full_html = markdown_to_telegram_html(cleaned_no_tables)
+        if len(full_html.strip()) < 50:
+            full_html = markdown_to_telegram_html(raw_text)
         res = f"{header}\n\n{lead}\n\n{full_html}"
 
     res = res.strip() + f"\n\n{hashtags}"

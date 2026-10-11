@@ -104,10 +104,10 @@ POPULAR_MODELS = {
         ("Gemma 2 9B IT", "gemma2-9b-it")
     ],
     "gemini": [
-        ("Gemini 3.5 Flash (Рекомендуемая 2026)", "gemini-3.5-flash"),
-        ("Gemini 3.5 Flash-Lite", "gemini-3.5-flash-lite"),
-        ("Gemini 2.5 Flash", "gemini-2.5-flash"),
-        ("Gemini 2.0 Flash", "gemini-2.0-flash")
+        ("Gemini 2.5 Flash (Рекомендуемая)", "gemini-2.5-flash"),
+        ("Gemini 2.0 Flash", "gemini-2.0-flash"),
+        ("Gemini 1.5 Flash", "gemini-1.5-flash"),
+        ("Gemini 2.5 Pro", "gemini-2.5-pro")
     ],
     "local": [
         ("Qwen 2.5 7B (LM Studio)", "qwen2.5-7b-instruct")
@@ -282,14 +282,13 @@ class LLMRouter:
                     if fb not in models_to_test:
                         models_to_test.append(fb)
             elif prov == "gemini":
-                # Google AI Studio официальные слаги (стандарт 2026 года и резерв)
+                # Google AI Studio официальные модели
                 gemini_pool = [
                     initial_model,
-                    "gemini-3.5-flash",
-                    "gemini-3.5-flash-lite",
                     "gemini-2.5-flash",
                     "gemini-2.0-flash",
-                    "gemini-2.0-flash-lite"
+                    "gemini-1.5-flash",
+                    "gemini-2.5-pro"
                 ]
                 models_to_test = []
                 for m in gemini_pool:
