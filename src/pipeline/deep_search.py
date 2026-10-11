@@ -190,7 +190,7 @@ class DeepSearchEngine:
         if self.tor_socks_proxy:
             try:
                 onion_search_url = f"https://ahmia.fi/search/?q={urllib.parse.quote(query)}"
-                async with httpx.AsyncClient(proxy=self.tor_socks_proxy, timeout=5.0, headers={"User-Agent": USER_AGENT}) as client:
+                async with httpx.AsyncClient(proxy=self.tor_socks_proxy, timeout=2.5, headers={"User-Agent": USER_AGENT}) as client:
                     resp = await client.get(onion_search_url)
                     if resp.status_code == 200 and resp.text:
                         results = self._parse_ahmia_results(resp.text, limit=limit)
