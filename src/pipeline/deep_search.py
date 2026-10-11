@@ -694,14 +694,17 @@ class DeepSearchEngine:
             p_tag = it.find("p")
             snippet = p_tag.get_text(strip=True) if p_tag else ""
 
-            # Извлекаем cite с .onion адресом если есть
+            # Извлекаем cite с .onion адресом только если в href нет полного адреса и в cite нет многоточия
             cite_tag = it.find("cite")
-            if cite_tag and not href.endswith(".onion"):
+            if cite_tag:
                 cite_text = cite_tag.get_text(strip=True)
-                if ".onion" in cite_text:
+                if ".onion" in cite_text and "..." not in cite_text and (".onion" not in href or len(cite_text) > len(href)):
                     href = cite_text
 
-            if ".onion" in href or ".onion" in title or ".onion" in snippet:
+            if href and not href.startswith("http"):
+                href = "http://" + href
+
+            if ".onion" in href:
                 results.append({
                     "title": title or "Скрытый ресурс .onion",
                     "url": href,
@@ -862,8 +865,11 @@ class DeepSearchEngine:
             "   - Если совпадений в каналах нет — напиши строго одну фразу: <i>В недавних публикациях подключенных Telegram-каналов прямых упоминаний за последние дни не зафиксировано.</i> (Категорически запрещено выводить нерелевантные новости других тем!).\n"
             "   - Что сообщают внешние авторитетные медиа и пресса.\n\n"
             "5. 🔗 <b>Верифицированные источники:</b>\n"
-            "   - Список источников с активными гиперссылками: <a href=\"URL\">Википедия: Название статьи</a>, <a href=\"URL\">Название СМИ</a>.\n"
-            "   (Если в запросе исследовался теневой сегмент Tor — отдельным коротким пунктом 🧅 <b>Теневой сегмент (.onion):</b> укажи статус утечек).\n\n"
+            "   - Список источников с активными гиперссылками: <a href=\"URL\">Википедия: Название статьи</a>, <a href=\"URL\">Название СМИ</a>.\n\n"
+            "6. 🧅 <b>Теневой сегмент сети Tor (.onion / Darknet):</b>\n"
+            "   - Если включен контур Darknet и найдены скрытые ресурсы, выведи их строго в формате: <code>http://адрес.onion</code> с кратким пояснением найденных данных.\n"
+            "   - Если прямых утечек не обнаружено, укажи: <i>В проиндексированном теневом сегменте Tor прямых утечек по теме не зафиксировано.</i>\n"
+            "   - КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО выводить пустые угловые скобки <>, &lt;&gt; или пустые ссылки без адреса!\n\n"
             "СТРОЖАЙШИЕ ПРАВИЛА И ЗАПРЕТЫ:\n"
             "- КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО путать персоналий и приписывать чужие псевдонимы или биографии (например: «Генерал Армагеддон» — это Сергей Суровикин, генерал армии ВС РФ, он не имеет отношения к ФСБ; главой ФСБ России с 2008 года является генерал армии Александр Бортников)!\n"
             "- КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО выдумывать фиктивные имена людей или ложные ссылки на Википедию (вроде несуществующих статей)! Ссылайся ТОЛЬКО на реальные факты и предоставленные источники.\n"
@@ -898,6 +904,20 @@ class DeepSearchEngine:
         if not ai_text:
             # Резервный формат если ИИ временно недоступен
             ai_text = self._build_fallback_summary(clean_query, user_sources, web_sources, darknet_sources, include_darknet, web_query=web_query)
+
+        # Гарантированное отображение найденных .onion источников в отчете
+        if include_darknet and darknet_sources:
+            has_onion_urls = any(it.get("url") and it.get("url") in ai_text for it in darknet_sources)
+            if not has_onion_urls or "&lt;&gt;" in ai_text or "<>" in ai_text:
+                dark_lines = ["\n\n🧅 <b>Теневой сегмент сети Tor (.onion / Darknet):</b>"]
+                for it in darknet_sources[:4]:
+                    tit = html.escape(it.get("title", "Скрытый сервис"))
+                    snip = html.escape(it.get("snippet", ""))
+                    url = it.get("url", "")
+                    badge = html.escape(it.get("trust_badge", "🧅 [Onion]"))
+                    warn = f"\n⚠️ <i>{html.escape(it.get('trust_warning'))}</i>" if it.get("trust_warning") else ""
+                    dark_lines.append(f"• {badge} <b>{tit}</b>\n<code>{url}</code>{warn}" + (f"\n<blockquote>{snip[:250]}</blockquote>" if snip else ""))
+                ai_text += "\n".join(dark_lines)
 
         if search_banner and not ai_text.startswith("🌐 <b>Поиск в сети:"):
             ai_text = search_banner + ai_text

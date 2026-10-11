@@ -32,6 +32,10 @@ def markdown_to_telegram_html(text: str) -> str:
         text = re.sub(r'\[ссылка\]\(ссылка\)', '', text, flags=re.IGNORECASE)
         text = re.sub(r'\n{3,}', '\n\n', text)
 
+    # 0.1 Очистка от пустых галлюцинированных ссылок и скобок (<>, &lt;&gt;)
+    text = re.sub(r'(?:\s*&lt;&gt;\s*|\s*<>\s*)+', '\n', text)
+    text = re.sub(r'\[([^\]]*)\]\((?:https?://)?\)', r'\1', text)
+
     # 1. Сохраняем блоки кода ```lang ... ```
     code_blocks = []
     def save_pre(m):
