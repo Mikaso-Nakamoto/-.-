@@ -182,6 +182,25 @@ class OSINTToolkit:
             except Exception:
                 pass
 
+            # 7. VirusTotal API (если задан бесплатный ключ VIRUSTOTAL_API_KEY)
+            vt_key = os.getenv("VIRUSTOTAL_API_KEY")
+            if vt_key:
+                try:
+                    vt_resp = await client.get(
+                        f"https://www.virustotal.com/api/v3/domains/{domain}",
+                        headers={"x-apikey": vt_key.strip()}
+                    )
+                    if vt_resp.status_code == 200:
+                        stats = vt_resp.json().get("data", {}).get("attributes", {}).get("last_analysis_stats", {})
+                        data["virustotal"] = {
+                            "malicious": stats.get("malicious", 0),
+                            "suspicious": stats.get("suspicious", 0),
+                            "harmless": stats.get("harmless", 0),
+                            "undetected": stats.get("undetected", 0)
+                        }
+                except Exception:
+                    pass
+
         return data
 
     # =========================================================================
@@ -229,6 +248,61 @@ class OSINTToolkit:
                         }
             except Exception:
                 pass
+
+            # 2.1 AbuseIPDB API (если задан бесплатный ключ ABUSEIPDB_API_KEY)
+            abuse_key = os.getenv("ABUSEIPDB_API_KEY")
+            if abuse_key:
+                try:
+                    abuse_resp = await client.get(
+                        "https://api.abuseipdb.com/api/v2/check",
+                        params={"ipAddress": ip, "maxAgeInDays": 90},
+                        headers={"Key": abuse_key.strip(), "Accept": "application/json"}
+                    )
+                    if abuse_resp.status_code == 200:
+                        a_data = abuse_resp.json().get("data", {})
+                        data["abuseipdb"] = {
+                            "abuse_score": a_data.get("abuseConfidenceScore", 0),
+                            "total_reports": a_data.get("totalReports", 0),
+                            "usage_type": a_data.get("usageType"),
+                            "domain": a_data.get("domain")
+                        }
+                except Exception:
+                    pass
+
+            # 2.2 VirusTotal IP API (если задан бесплатный ключ VIRUSTOTAL_API_KEY)
+            vt_key = os.getenv("VIRUSTOTAL_API_KEY")
+            if vt_key:
+                try:
+                    vt_resp = await client.get(
+                        f"https://www.virustotal.com/api/v3/ip_addresses/{ip}",
+                        headers={"x-apikey": vt_key.strip()}
+                    )
+                    if vt_resp.status_code == 200:
+                        stats = vt_resp.json().get("data", {}).get("attributes", {}).get("last_analysis_stats", {})
+                        data["virustotal"] = {
+                            "malicious": stats.get("malicious", 0),
+                            "suspicious": stats.get("suspicious", 0),
+                            "harmless": stats.get("harmless", 0),
+                            "undetected": stats.get("undetected", 0)
+                        }
+                except Exception:
+                    pass
+
+            # 2.3 Shodan Host API (если задан бесплатный ключ SHODAN_API_KEY)
+            shodan_key = os.getenv("SHODAN_API_KEY")
+            if shodan_key:
+                try:
+                    sh_resp = await client.get(f"https://api.shodan.io/shodan/host/{ip}?key={shodan_key.strip()}")
+                    if sh_resp.status_code == 200:
+                        sh_data = sh_resp.json()
+                        data["shodan"] = {
+                            "ports": sh_data.get("ports", []),
+                            "vulns": list(sh_data.get("vulns", {}).keys()) if isinstance(sh_data.get("vulns"), dict) else (sh_data.get("vulns") or []),
+                            "os": sh_data.get("os"),
+                            "tags": sh_data.get("tags", [])
+                        }
+                except Exception:
+                    pass
 
         # 3. Nmap (если установлен) или быстрый асинхронный сокет-скан
         nmap_bin = shutil.which("nmap")
@@ -701,6 +775,9 @@ class OSINTToolkit:
             subs = data.get("subdomains", [])
             if subs:
                 lines.append(f"\n🔍 <b>Обнаруженные субдомены (crt.sh/subfinder):</b>\n" + "\n".join([f"• <code>{s}</code>" for s in subs[:8]]))
+            vt = data.get("virustotal")
+            if vt:
+                lines.append(f"\n🛡 <b>VirusTotal Telemetry:</b> ⚠️ Вредоносных детектов: <b>{vt.get('malicious', 0)}</b> | Безвредных: <b>{vt.get('harmless', 0)}</b>")
             dorks = data.get("dorks", [])
             if dorks:
                 lines.append("\n🔎 <b>Готовые Google Dorks для цели:</b>")
@@ -715,6 +792,16 @@ class OSINTToolkit:
                 lines.append(f"• Провайдер / ASN: <i>{g.get('isp')} | {g.get('asn')}</i>")
             if data.get("hostname"):
                 lines.append(f"• Reverse DNS (PTR): <code>{html.escape(data['hostname'])}</code>")
+            abuse = data.get("abuseipdb")
+            if abuse:
+                lines.append(f"• <b>AbuseIPDB:</b> Уровень доверия/риска: <b>{abuse.get('abuse_score', 0)}%</b> (всего жалоб: <i>{abuse.get('total_reports', 0)}</i>)")
+            vt = data.get("virustotal")
+            if vt:
+                lines.append(f"• <b>VirusTotal:</b> ⚠️ Вредоносных: <b>{vt.get('malicious', 0)}</b> | Безопасных: <b>{vt.get('harmless', 0)}</b>")
+            sh = data.get("shodan")
+            if sh:
+                vulns_str = ", ".join(sh.get("vulns", [])[:3]) if sh.get("vulns") else "нет известных"
+                lines.append(f"• <b>Shodan:</b> Порты: <code>{sh.get('ports', [])}</code>, Уязвимости: <i>{vulns_str}</i>")
             ports = data.get("open_ports", [])
             if ports:
                 lines.append(f"• Открытые порты: <b>{', '.join(map(str, ports))}</b>")
