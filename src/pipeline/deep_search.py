@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import urllib.parse
+import xml.etree.ElementTree as ET
 from typing import List, Dict, Any, Optional
 
 import httpx
@@ -107,61 +108,193 @@ class DeepSearchEngine:
             logger.error(f"Ошибка при поиске по собственным источникам: {e}")
             return []
 
-    async def search_web(
+    async def _search_wikipedia(
         self,
         query: str,
-        limit: int = 4,
-        timeout: float = 12.0,
-        use_google_ai: bool = True,
-        llm_router: Optional[LLMRouter] = None,
-        fallback_queries: Optional[List[str]] = None
+        limit: int = 3,
+        client_configs: Optional[List[Dict[str, Any]]] = None,
+        headers: Optional[Dict[str, str]] = None
     ) -> List[Dict[str, Any]]:
         """
-        Контур 2: Внешний поиск по открытым авторитетным источникам (Web).
-        1. Если включен Google 'Режим ИИ' и задан GEMINI_API_KEY — опрашивает Google Search Grounding.
-        2. Фоллбэк 1 — поисковые шлюзы DuckDuckGo (HTML / Lite) через локальный Xray-прокси.
-        3. Фоллбэк 2 — энциклопедический поиск Wikipedia API.
-        4. Фоллбэк 3 — каскадный поиск по декомпозированным подзапросам fallback_queries.
+        Полнотекстовый поиск по Википедии (Wikipedia Full-Text API) с извлечением вводного абзаца статьи (Lead Extract).
+        Находит реальные статьи даже по косвенным запросам (например: «Генерал Суровикин» -> «Суровикин, Сергей Владимирович»).
         """
-        results: List[Dict[str, Any]] = []
+        configs = client_configs or [{}]
+        hdrs = headers or {"User-Agent": USER_AGENT}
+        results = []
 
-        # 1. Попытка через Google 'Режим ИИ' (Gemini Search Grounding)
-        if llm_router and llm_router.config.gemini.api_key:
-            self.google_grounding.api_key = llm_router.config.gemini.api_key
-        elif not self.google_grounding.api_key:
+        # 1. Полнотекстовый поиск в русской Википедии
+        search_url = f"https://ru.wikipedia.org/w/api.php?action=query&list=search&srsearch={urllib.parse.quote(query)}&utf8=&format=json"
+        search_items = []
+        for cfg in configs:
             try:
-                cfg = load_app_config()
-                self.google_grounding.api_key = cfg.llm.gemini.api_key or os.getenv("GEMINI_API_KEY")
+                async with httpx.AsyncClient(follow_redirects=True, headers=hdrs, **cfg) as client:
+                    resp = await client.get(search_url)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        search_items = data.get("query", {}).get("search", [])
+                        if search_items:
+                            break
+            except Exception as e:
+                logger.debug(f"Wikipedia search error ({cfg}): {e}")
+
+        if not search_items:
+            # Резервный OpenSearch (префиксный)
+            open_url = f"https://ru.wikipedia.org/w/api.php?action=opensearch&search={urllib.parse.quote(query)}&limit={limit}&namespace=0&format=json"
+            for cfg in configs:
+                try:
+                    async with httpx.AsyncClient(follow_redirects=True, headers=hdrs, **cfg) as client:
+                        resp = await client.get(open_url)
+                        if resp.status_code == 200:
+                            data = resp.json()
+                            if len(data) >= 4 and data[1]:
+                                for t, d, u in zip(data[1], data[2], data[3]):
+                                    if u and u.startswith("http"):
+                                        results.append({
+                                            "title": f"Википедия: {t}",
+                                            "url": u,
+                                            "snippet": d or f"Энциклопедические сведения о {t}",
+                                            "source_type": "web",
+                                            "trust_badge": "🟢 [Траствик / Википедия]",
+                                            "trust_score": 90
+                                        })
+                                        if len(results) >= limit:
+                                            break
+                            if results:
+                                return results
+                except Exception:
+                    pass
+            return results
+
+        # 2. Получение подробного вводного абзаца (Extract)
+        top_titles = [it.get("title", "") for it in search_items[:limit] if it.get("title")]
+        titles_param = "|".join(top_titles)
+        extract_url = f"https://ru.wikipedia.org/w/api.php?action=query&prop=extracts&exintro=1&explaintext=1&titles={urllib.parse.quote(titles_param)}&format=json"
+        extracts_map = {}
+        for cfg in configs:
+            try:
+                async with httpx.AsyncClient(follow_redirects=True, headers=hdrs, **cfg) as client:
+                    ext_resp = await client.get(extract_url)
+                    if ext_resp.status_code == 200:
+                        pages = ext_resp.json().get("query", {}).get("pages", {})
+                        for pid, pdata in pages.items():
+                            t = pdata.get("title")
+                            ex = pdata.get("extract", "")
+                            if t and ex:
+                                extracts_map[t] = ex
+                        break
             except Exception:
                 pass
 
-        if use_google_ai and self.google_grounding.is_available():
+        for it in search_items[:limit]:
+            title = it.get("title", "")
+            raw_snippet = it.get("snippet", "")
+            clean_snippet = re.sub(r'<[^>]+>', '', raw_snippet).strip()
+            lead_extract = extracts_map.get(title, clean_snippet)
+            page_url = f"https://ru.wikipedia.org/wiki/{urllib.parse.quote(title.replace(' ', '_'))}"
+            results.append({
+                "title": f"Википедия: {title}",
+                "url": page_url,
+                "snippet": lead_extract[:500] if lead_extract else clean_snippet,
+                "source_type": "web",
+                "trust_badge": "🟢 [Траствик / Википедия]",
+                "trust_score": 90
+            })
+
+        return results
+
+    async def _search_google_news_rss(
+        self,
+        query: str,
+        limit: int = 3,
+        client_configs: Optional[List[Dict[str, Any]]] = None,
+        headers: Optional[Dict[str, str]] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Поиск свежих новостей через открытый RSS-поток Google News.
+        Надежно работает через прокси, возвращает реальные заголовки и ссылки СМИ (РИА Новости, ТАСС, TOPNews и др.).
+        """
+        configs = client_configs or [{}]
+        hdrs = headers or {"User-Agent": USER_AGENT}
+        news_url = f"https://news.google.com/rss/search?q={urllib.parse.quote(query)}&hl=ru&gl=RU&ceid=RU:ru"
+        results = []
+
+        for cfg in configs:
             try:
-                g_res = await self.google_grounding.search_and_ground(query, timeout=min(timeout, 30.0))
-                if g_res and g_res.get("sources"):
-                    results = g_res["sources"][:limit]
-            except Exception as ge:
-                logger.debug(f"Google Grounding error, fallback to DuckDuckGo: {ge}")
+                async with httpx.AsyncClient(follow_redirects=True, headers=hdrs, **cfg) as client:
+                    resp = await client.get(news_url)
+                    if resp.status_code == 200 and resp.text:
+                        root = ET.fromstring(resp.text)
+                        for item in root.findall(".//item")[:limit]:
+                            tit = item.findtext("title", "")
+                            link = item.findtext("link", "")
+                            source_tag = item.find("source")
+                            source_name = source_tag.text if source_tag is not None else "СМИ"
+                            pub_date = item.findtext("pubDate", "")
+                            if tit and link:
+                                results.append({
+                                    "title": f"{source_name}: {tit}",
+                                    "url": link,
+                                    "snippet": f"Материал издания {source_name} ({pub_date}): {tit}",
+                                    "source_type": "web",
+                                    "trust_badge": f"🌐 [{source_name}]",
+                                    "trust_score": 75
+                                })
+                        if results:
+                            break
+            except Exception as e:
+                logger.debug(f"Google News RSS search error ({cfg}): {e}")
 
-        if results:
-            return self.trust_manager.enrich_items(results)
+        return results
 
-        headers = {
-            "User-Agent": USER_AGENT,
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
-        }
+    async def _search_duckduckgo_api(
+        self,
+        query: str,
+        client_configs: Optional[List[Dict[str, Any]]] = None,
+        headers: Optional[Dict[str, str]] = None
+    ) -> List[Dict[str, Any]]:
+        """DuckDuckGo Instant Answer API (быстрое определение без капчи)"""
+        configs = client_configs or [{}]
+        hdrs = headers or {"User-Agent": USER_AGENT}
+        ddg_api_url = f"https://api.duckduckgo.com/?q={urllib.parse.quote(query)}&format=json&no_html=1&skip_disambig=1"
+        for cfg in configs:
+            try:
+                async with httpx.AsyncClient(follow_redirects=True, headers=hdrs, **cfg) as client:
+                    resp = await client.get(ddg_api_url)
+                    if resp.status_code == 200 and resp.text:
+                        data = resp.json()
+                        abstract = data.get("AbstractText", "")
+                        heading = data.get("Heading", "")
+                        abs_url = data.get("AbstractURL", "")
+                        if abstract:
+                            return [{
+                                "title": heading or query,
+                                "url": abs_url or f"https://duckduckgo.com/?q={urllib.parse.quote(query)}",
+                                "snippet": abstract[:450],
+                                "source_type": "web",
+                                "trust_badge": "🌐 [DuckDuckGo Справочник]",
+                                "trust_score": 80
+                            }]
+            except Exception:
+                pass
+        return []
 
-        # 2. DuckDuckGo HTML интерфейс (сначала через Xray-прокси, затем напрямую)
+    async def _scrape_duckduckgo(
+        self,
+        query: str,
+        limit: int = 4,
+        client_configs: Optional[List[Dict[str, Any]]] = None,
+        headers: Optional[Dict[str, str]] = None
+    ) -> List[Dict[str, Any]]:
+        """Парсинг DuckDuckGo HTML / Lite"""
+        configs = client_configs or [{}]
+        hdrs = headers or {"User-Agent": USER_AGENT}
+        results = []
+
         ddg_url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(query)}"
-        client_configs = []
-        if self.xray_http_proxy:
-            client_configs.append({"proxy": self.xray_http_proxy, "timeout": timeout})
-        client_configs.append({"timeout": timeout})
-
-        for cfg in client_configs:
+        for cfg in configs:
             try:
-                async with httpx.AsyncClient(follow_redirects=True, headers=headers, **cfg) as client:
+                async with httpx.AsyncClient(follow_redirects=True, headers=hdrs, **cfg) as client:
                     resp = await client.get(ddg_url)
                     if resp.status_code == 200 and resp.text:
                         soup = BeautifulSoup(resp.text, "html.parser")
@@ -192,16 +325,15 @@ class DeepSearchEngine:
                                     break
                 if results:
                     break
-            except Exception as e:
-                logger.debug(f"Web search attempt ({cfg}) error: {e}")
+            except Exception:
+                pass
 
-        # 3. Если DuckDuckGo HTML не вернул результат, пробуем Lite версию
         if not results:
             lite_url = "https://lite.duckduckgo.com/lite/"
             data = {"q": query}
-            for cfg in client_configs:
+            for cfg in configs:
                 try:
-                    async with httpx.AsyncClient(follow_redirects=True, headers=headers, **cfg) as client:
+                    async with httpx.AsyncClient(follow_redirects=True, headers=hdrs, **cfg) as client:
                         resp = await client.post(lite_url, data=data)
                         if resp.status_code == 200 and resp.text:
                             soup = BeautifulSoup(resp.text, "html.parser")
@@ -230,43 +362,101 @@ class DeepSearchEngine:
                                             break
                     if results:
                         break
-                except Exception as e2:
-                    logger.debug(f"DuckDuckGo Lite search attempt ({cfg}) error: {e2}")
+                except Exception:
+                    pass
 
-        # 4. Фоллбэк через энциклопедический поиск Wikipedia API
-        if not results:
-            wiki_url = f"https://ru.wikipedia.org/w/api.php?action=opensearch&search={urllib.parse.quote(query)}&limit={limit}&namespace=0&format=json"
-            for cfg in client_configs:
-                try:
-                    async with httpx.AsyncClient(follow_redirects=True, headers=headers, **cfg) as client:
-                        resp = await client.get(wiki_url)
-                        if resp.status_code == 200:
-                            data = resp.json()
-                            if len(data) >= 4:
-                                titles, descs, urls = data[1], data[2], data[3]
-                                for t, d, u in zip(titles, descs, urls):
-                                    if u and u.startswith("http"):
-                                        results.append({
-                                            "title": f"Википедия: {t}",
-                                            "url": u,
-                                            "snippet": d or f"Энциклопедические сведения о {t}",
-                                            "source_type": "web",
-                                            "trust_badge": "🌐 [Открытый Web / Справочник]"
-                                        })
-                                        if len(results) >= limit:
-                                            break
-                    if results:
-                        break
-                except Exception as we:
-                    logger.debug(f"Wikipedia search error ({cfg}): {we}")
+        return results
 
-        # 5. Фоллбэк: опрос по альтернативным подзапросам декомпозиции
-        if not results and fallback_queries:
+    async def search_web(
+        self,
+        query: str,
+        limit: int = 4,
+        timeout: float = 12.0,
+        use_google_ai: bool = True,
+        llm_router: Optional[LLMRouter] = None,
+        fallback_queries: Optional[List[str]] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Контур 2: Многоуровневый интеллектуальный веб-поиск.
+        1. Google Search Grounding (Gemini).
+        2. Полнотекстовый поиск Википедии + Lead Extracts (биографии, ТТХ, исторические вехи).
+        3. Google News RSS (свежие публикации федеральных и мировых СМИ).
+        4. DuckDuckGo Instant Answer API.
+        5. DuckDuckGo HTML / Lite scraping.
+        6. Каскадный поиск по декомпозированным подзапросам fallback_queries.
+        """
+        results: List[Dict[str, Any]] = []
+
+        # 1. Google 'Режим ИИ' (Gemini Search Grounding)
+        if llm_router and llm_router.config.gemini.api_key:
+            self.google_grounding.api_key = llm_router.config.gemini.api_key
+        elif not self.google_grounding.api_key:
+            try:
+                cfg = load_app_config()
+                self.google_grounding.api_key = cfg.llm.gemini.api_key or os.getenv("GEMINI_API_KEY")
+            except Exception:
+                pass
+
+        if use_google_ai and self.google_grounding.is_available():
+            try:
+                g_res = await self.google_grounding.search_and_ground(query, timeout=min(timeout, 30.0))
+                if g_res and g_res.get("sources"):
+                    results.extend(g_res["sources"][:limit])
+            except Exception as ge:
+                logger.debug(f"Google Grounding error, fallback to multi-engine: {ge}")
+
+        if len(results) >= limit:
+            return self.trust_manager.enrich_items(results[:limit])
+
+        headers = {
+            "User-Agent": USER_AGENT,
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+        }
+        client_configs = []
+        if self.xray_http_proxy:
+            client_configs.append({"proxy": self.xray_http_proxy, "timeout": timeout})
+        client_configs.append({"timeout": timeout})
+
+        # 2. Полнотекстовый поиск Википедии + Lead Extracts
+        try:
+            wiki_res = await self._search_wikipedia(query, limit=2, client_configs=client_configs, headers=headers)
+            if wiki_res:
+                results.extend(wiki_res)
+        except Exception as we:
+            logger.debug(f"Wikipedia collector error: {we}")
+
+        # 3. Google News RSS (свежие статьи прессы)
+        if len(results) < limit:
+            try:
+                news_res = await self._search_google_news_rss(query, limit=2, client_configs=client_configs, headers=headers)
+                if news_res:
+                    results.extend(news_res)
+            except Exception as ne:
+                logger.debug(f"News RSS collector error: {ne}")
+
+        # 4. DuckDuckGo Instant Answer API
+        if len(results) < limit:
+            try:
+                ddg_api_res = await self._search_duckduckgo_api(query, client_configs=client_configs, headers=headers)
+                if ddg_api_res:
+                    results.extend(ddg_api_res)
+            except Exception:
+                pass
+
+        # 5. DuckDuckGo HTML / Lite
+        if len(results) < limit:
+            ddg_html_res = await self._scrape_duckduckgo(query, limit=limit, client_configs=client_configs, headers=headers)
+            if ddg_html_res:
+                results.extend(ddg_html_res)
+
+        # 6. Каскадный поиск по декомпозированным подзапросам
+        if len(results) < limit and fallback_queries:
             for alt_q in fallback_queries[:2]:
                 try:
                     alt_res = await self.search_web(
                         alt_q,
-                        limit=limit,
+                        limit=limit - len(results),
                         timeout=timeout,
                         use_google_ai=use_google_ai,
                         llm_router=llm_router,
@@ -279,7 +469,6 @@ class DeepSearchEngine:
                 except Exception:
                     pass
 
-        # Обогащаем результаты метаданными Траствиков (CVE, Exploit-DB, LostArmour)
         return self.trust_manager.enrich_items(results[:limit])
 
     @staticmethod
@@ -650,34 +839,28 @@ class DeepSearchEngine:
             )
 
         ai_prompt += (
-            "ИНСТРУКЦИЯ ПО ОФОРМЛЕНИЮ ОТВЕТА:\n"
-            "Сформируй исчерпывающий, профессиональный OSINT-ответ в HTML-формате Telegram.\n"
-            "Строго соблюдай следующую последовательность разделов:\n\n"
-            "1. 📱 <b>По данным ваших каналов и мониторинга:</b>\n"
-            "Если в ваших каналах есть совпадения — приведи конкретные факты, цитаты и ссылки на каналы (@Voennaja_svodka, @infomil_live, @rybar).\n"
-            "Если в блоке КОНТУР 1 указано 'ПОЛНОЕ ОТСУТСТВИЕ СОВПАДЕНИЙ' — напиши строго одну фразу:\n"
-            "<i>В недавних публикациях подключенных Telegram-каналов прямых упоминаний не зафиксировано.</i>\n"
-            "(Категорически запрещено выводить нерелевантные новости других тем!).\n\n"
-            "2. 🌐 <b>По данным внешних авторитетных источников:</b>\n"
-            "Что известно из внешнего интернета, мировых СМИ, профильных блогов или официальных сводок. "
-            "Приводи факты с активными ссылками на первоисточники <a href=\"URL\">Источник</a>. "
-            "Если источник верифицирован в Траствике (LostArmour, CVE, Exploit-DB), обязательно подчеркни его надежность.\n"
-            "ВНИМАНИЕ: Если внешние ссылки в блоке ограничены или запрос широкий, КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО заявлять, что предмета запроса не существует (например, заявлять что у России нет нового оружия)! "
-            "Используй свои глубокие экспертные знания ИИ: подробно изложи известные и актуальные факты по теме запроса "
-            "(конкретные новейшие модели вооружений, дронов, ракетных систем и техники: реактивная «Герань-5», оптоволоконный дрон «Князь Вандал», модернизированный «Ланцет-3», «Охотник С-70», ракета «Орешник», комплексы РЭБ), их ТТХ и особенности боевого применения.\n\n"
-            "3. 🧅 <b>По данным мониторинга теневого сегмента (.onion):</b>\n"
-            "Что обнаружено в сети Tor (форумы, утечки, теневые посты, зеркала). "
-            "Если ресурс имеет пометку ⚠️ [Неверифицированный Onion] — обязательно предупреди пользователя о риске фишинга/скама. "
-            "Если сигналов нет — честно отметь, что в даркнете утечек по теме не зафиксировано.\n\n"
-            "4. 🎯 <b>Аналитическое резюме:</b>\n"
-            "Краткий синтез: сходятся ли данные из ваших каналов с внешней картиной, "
-            "каковы ключевые тенденции развития технологий, оценка боевой эффективности и достоверности сведений. "
-            "Категорически запрещено делать ложные выводы об отсутствии предмета запроса при нехватке сетевых ссылок.\n\n"
-            "СТРОЖАЙШИЕ ПРАВИЛА ВЕРСТКИ:\n"
+            "ИНСТРУКЦИЯ ПО ОФОРМЛЕНИЮ ОТВЕТА (ФОРМАТ OSINT-ДОСЬЕ И АНАЛИТИЧЕСКОГО СИНТЕЗА):\n"
+            "Сформируй исчерпывающий, профессиональный OSINT-ответ в HTML-формате Telegram уровня Google AI Overviews / Perplexity Pro.\n\n"
+            "СТРУКТУРА ОТВЕТА:\n"
+            "1. 🎖 <b>[ФИО персоны / Название темы / Объект] — Аналитическое досье:</b>\n"
+            "   - Четкое фактологическое определение: кто это / что это, официальный статус, звания, награды, ключевая роль (например: Генерал армии РФ, Герой России, неофициальное имя «Генерал Армагеддон», создатель фортификационной «Линии Суровикина»).\n\n"
+            "2. 📌 <b>Ключевые этапы, боевой путь или характеристики:</b>\n"
+            "   - Структурированные пункты фактов: становление, боевой опыт (Таджикистан, Чечня, Сирия), командование ВКС РФ, руководство Объединенной группировкой в зоне СВО (создание оборонительной линии, ракетные удары по энергетике).\n\n"
+            "3. 📍 <b>Текущий статус и положение дел (2024–2026):</b>\n"
+            "   - Актуальное положение дел, международные миссии (Алжир, координация в Африке), возвращение в Москву, новые задачи.\n\n"
+            "4. 📱 <b>Оперативный мониторинг (Telegram и СМИ):</b>\n"
+            "   - Если в подключенных Telegram-каналах найдены публикации — приведи конкретные факты и ссылки на посты.\n"
+            "   - Если совпадений в каналах нет — напиши строго одну фразу: <i>В недавних публикациях подключенных Telegram-каналов прямых упоминаний за последние дни не зафиксировано.</i> (Категорически запрещено выводить нерелевантные новости других тем!).\n"
+            "   - Что сообщают внешние авторитетные медиа и пресса.\n\n"
+            "5. 🔗 <b>Верифицированные источники:</b>\n"
+            "   - Список источников с активными гиперссылками: <a href=\"URL\">Википедия: Название статьи</a>, <a href=\"URL\">Название СМИ</a>.\n"
+            "   (Если в запросе исследовался теневой сегмент Tor — отдельным коротким пунктом 🧅 <b>Теневой сегмент (.onion):</b> укажи статус утечек).\n\n"
+            "СТРОЖАЙШИЕ ПРАВИЛА И ЗАПРЕТЫ:\n"
+            "- КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО заявлять, что «в интернете и мировых СМИ нет информации» о реальных известных военачальниках, политиках, исторических событиях или образцах техники! Используй предоставленные источники и свои фундаментальные экспертные знания ИИ для составления детального досье.\n"
             "- Используй ТОЛЬКО разрешенный Telegram HTML (<b>, <i>, <code>, <blockquote>, <a href=\"...\">).\n"
-            "- КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО использовать Markdown: никаких **звездочек**, никаких ```кавычек```, никаких знаков > для цитат!\n"
-            "- КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО оборачивать целые разделы (особенно раздел 2 «По данным внешних авторитетных источников»), списки или пункты новостей в <blockquote> целиком! Весь текст пиши обычным текстом с <b>заголовками</b>.\n"
-            "- Тег <blockquote> разрешен ИСКЛЮЧИТЕЛЬНО для коротких прямых цитат конкретных спикеров в 1-2 строки (например: <blockquote>«Цитата» — Трамп</blockquote>).\n"
+            "- КАТЕГОРИЧЕСКИ ЗАПРЕЩЕН Markdown: никаких **звездочек**, никаких ```кавычек```!\n"
+            "- КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО оборачивать целые разделы, списки или пункты новостей в <blockquote> целиком! Весь текст пиши обычным текстом с <b>заголовками</b>.\n"
+            "- Тег <blockquote> разрешен ИСКЛЮЧИТЕЛЬНО для коротких прямых цитат конкретных спикеров в 1-2 строки (например: <blockquote>«Цитата» — Спикер</blockquote>).\n"
             "- Категорически запрещено использовать шаблоны-заглушки вида '— @канал' или '[@канал](ссылка)'.\n"
             "- Ответ должен быть содержательным, плотным и фактологическим, без пустой воды."
         )
@@ -720,7 +903,19 @@ class DeepSearchEngine:
         include_darknet: bool
     ) -> str:
         """Резервный структурированный генератор если нейросеть недоступна"""
-        lines = [f"🔍 <b>Результаты основательного поиска по запросу:</b> <i>«{html.escape(query)}»</i>\n"]
+        lines = [f"🔍 <b>Аналитическое досье по запросу:</b> <i>«{html.escape(query)}»</i>\n"]
+
+        # Если среди найденных источников есть Википедия или энциклопедическая справка — выводим фактологическое досье
+        wiki_items = [it for it in web_sources if "википед" in it.get("title", "").lower()]
+        other_web = [it for it in web_sources if it not in wiki_items]
+
+        if wiki_items:
+            w = wiki_items[0]
+            w_tit = html.escape(w.get("title", ""))
+            w_snip = html.escape(w.get("snippet", ""))
+            w_url = w.get("url", "")
+            lines.append("🎖 <b>Фактологическая справка:</b>")
+            lines.append(f"<a href=\"{w_url}\"><b>{w_tit}</b></a>\n<blockquote>{w_snip}</blockquote>\n")
 
         # 1. Каналы
         lines.append("📱 <b>1. По данным ваших каналов и мониторинга:</b>")
@@ -734,12 +929,13 @@ class DeepSearchEngine:
                 link_html = f' — <a href="{url}">Перейти к посту</a>' if url else ""
                 lines.append(f"• <b>[{ch}]</b> {f'({pub})' if pub else ''}: {tit}\n<blockquote>{cnt}...</blockquote>{link_html}\n")
         else:
-            lines.append("<i>В подключенных Telegram-каналах совпадений не обнаружено.</i>\n")
+            lines.append("<i>В недавних публикациях подключенных Telegram-каналов прямых упоминаний не зафиксировано.</i>\n")
 
         # 2. Web
-        lines.append("🌐 <b>2. Внешние авторитетные источники (Web):</b>")
-        if web_sources:
-            for it in web_sources:
+        lines.append("🌐 <b>2. Внешние авторитетные источники и пресса (Web):</b>")
+        display_web = (wiki_items[1:] + other_web) if wiki_items else web_sources
+        if display_web:
+            for it in display_web:
                 tit = html.escape(it.get("title", ""))
                 snip = html.escape(it.get("snippet", ""))
                 url = it.get("url", "")

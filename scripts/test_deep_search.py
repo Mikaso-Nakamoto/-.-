@@ -82,6 +82,32 @@ async def test_deep_search_flow():
     assert "https://t.me/medvedev_telegram/501" in summary
     print("✓ Fallback multi-contour summary generated cleanly with correct sections.")
 
+    print("\n=== TEST 4B: Fallback Summary with Wikipedia Encyclopedic Dossier ===")
+    wiki_summary = engine._build_fallback_summary(
+        query="Генерал Суровикин",
+        user_sources=[],
+        web_sources=[
+            {
+                "title": "Википедия: Суровикин, Сергей Владимирович",
+                "url": "https://ru.wikipedia.org/wiki/Суровикин,_Сергей_Владимирович",
+                "snippet": "Сергей Владимирович Суровикин — российский военачальник, генерал армии (2021), Герой РФ (2017).",
+                "trust_badge": "🟢 [Траствик / Википедия]"
+            },
+            {
+                "title": "TOPNews.RU: вернулся из Алжира в Москву",
+                "url": "https://topnews.ru/news/123",
+                "snippet": "Служебная командировка в Алжир завершена.",
+                "trust_badge": "🌐 [TOPNews.RU]"
+            }
+        ],
+        darknet_sources=[],
+        include_darknet=False
+    )
+    assert "Фактологическая справка:" in wiki_summary
+    assert "Суровикин, Сергей Владимирович" in wiki_summary
+    assert "TOPNews.RU" in wiki_summary
+    print("✓ Wikipedia encyclopedic dossier successfully generated in fallback mode.")
+
     print("\n=== TEST 5: Conversational Query Cleaning and Channel Extraction ===")
     from src.pipeline.semantic_search import SemanticSearchEngine
     sem_engine = SemanticSearchEngine()
