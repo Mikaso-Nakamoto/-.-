@@ -61,6 +61,7 @@ class DigestBuilder:
         # Гарантированно сохраняем свежие публикации ключевых первоисточников
         key_channel_names = {
             "ross_name", "dyadyabatya0", "rybar", "rostov_tsargrad",
+            "voennaja_svodka", "infomil_live",
             "it_shelter", "github_radar", "cyberpolice_rus", "xakep_ru"
         }
 

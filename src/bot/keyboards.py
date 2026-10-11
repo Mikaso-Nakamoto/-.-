@@ -4,24 +4,24 @@ from src.llm.router import POPULAR_MODELS
 
 def get_main_menu_keyboard(chat_mode: bool = False, web_app_url: Optional[str] = None) -> InlineKeyboardMarkup:
     chat_btn = (
-        InlineKeyboardButton(text="🔴 Завершить режим чата", callback_data="btn_chat_stop")
+        InlineKeyboardButton(text="🔴 Завершить диалог", callback_data="btn_chat_stop")
         if chat_mode
-        else InlineKeyboardButton(text="💬 Режим диалога (Чат)", callback_data="btn_chat_start")
+        else InlineKeyboardButton(text="💬 Задать вопрос / Чат", callback_data="btn_chat_start")
     )
 
     first_row = [
-        InlineKeyboardButton(text="📰 Дайджест сейчас", callback_data="btn_run_digest"),
-        InlineKeyboardButton(text="⚡️ Статус нод", callback_data="btn_status")
+        InlineKeyboardButton(text="⚡️ Аналитическая сводка", callback_data="btn_run_digest"),
+        chat_btn
     ]
 
     second_row = [
-        InlineKeyboardButton(text="🧠 Выбор нейросети", callback_data="btn_select_provider"),
-        InlineKeyboardButton(text="🎯 Модели", callback_data="btn_browse_models")
+        InlineKeyboardButton(text="🧠 Нейросети & Модели", callback_data="btn_select_provider"),
+        InlineKeyboardButton(text="📡 Источники разведки", callback_data="btn_sources")
     ]
 
     third_row = [
-        chat_btn,
-        InlineKeyboardButton(text="📡 Источники", callback_data="btn_sources")
+        InlineKeyboardButton(text="🔄 Обновить ленту", callback_data="btn_refresh_now"),
+        InlineKeyboardButton(text="📊 Статус контура", callback_data="btn_status")
     ]
 
     rows = [first_row, second_row, third_row]
@@ -29,7 +29,7 @@ def get_main_menu_keyboard(chat_mode: bool = False, web_app_url: Optional[str] =
     if web_app_url and str(web_app_url).strip():
         clean_url = str(web_app_url).strip()
         if clean_url.lower().startswith("https://"):
-            rows.append([InlineKeyboardButton(text="📱 Открыть окно в TG", web_app=WebAppInfo(url=clean_url))])
+            rows.append([InlineKeyboardButton(text="📱 Открыть терминал (Web)", web_app=WebAppInfo(url=clean_url))])
         elif clean_url.lower().startswith("http://"):
             rows.append([InlineKeyboardButton(text="🌐 Веб-панель (LAN)", url=clean_url)])
 
@@ -74,11 +74,11 @@ def get_digest_feedback_keyboard(web_app_url: Optional[str] = None, md_file_id: 
 
 def get_provider_selection_keyboard(current_provider: str) -> InlineKeyboardMarkup:
     providers = [
-        ("🔄 Auto (Local -> Cloud Failover)", "prov_auto"),
-        ("🖥 Локальный ПК (LM Studio)", "prov_local"),
-        ("⚡️ GroqCloud (Ultra-Fast LPU)", "prov_groq"),
+        ("🔄 Auto (Local -> Резерв в облако)", "prov_auto"),
+        ("🖥 Локальный ПК (LM Studio Qwen 2.5)", "prov_local"),
         ("🌐 Google Gemini (Flash / Pro)", "prov_gemini"),
-        ("🔀 OpenRouter (Free Pool)", "prov_openrouter")
+        ("⚡️ GroqCloud (Llama 3.3 70B)", "prov_groq"),
+        ("🔀 OpenRouter (Бесплатный пул)", "prov_openrouter")
     ]
 
     buttons = []
@@ -87,7 +87,15 @@ def get_provider_selection_keyboard(current_provider: str) -> InlineKeyboardMark
         check = " ✅" if prov_key == current_provider else ""
         buttons.append([InlineKeyboardButton(text=f"{label}{check}", callback_data=callback_data)])
 
-    buttons.append([InlineKeyboardButton(text="🔙 Главное меню", callback_data="btn_menu")])
+    # Интегрированные каталоги моделей
+    buttons.append([
+        InlineKeyboardButton(text="🎯 Модели Gemini", callback_data="viewmods_gemini"),
+        InlineKeyboardButton(text="🎯 Модели Groq", callback_data="viewmods_groq")
+    ])
+    buttons.append([
+        InlineKeyboardButton(text="🎯 Бесплатные OpenRouter", callback_data="viewmods_openrouter")
+    ])
+    buttons.append([InlineKeyboardButton(text="🔙 Главный терминал", callback_data="btn_menu")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def get_models_keyboard(provider: str, current_model: str) -> InlineKeyboardMarkup:

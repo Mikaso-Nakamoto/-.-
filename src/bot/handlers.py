@@ -313,19 +313,32 @@ def split_telegram_html(text: str, max_chunk: int = 3800) -> List[str]:
         active_prov = llm_router.active_provider
         current_model = llm_router.get_current_model_for_provider(active_prov if active_prov != "auto" else "openrouter")
         chat_active = storage.is_chat_mode_active()
+        is_test_mode = storage.is_test_mode()
         tz_name = scheduler.timezone_name if scheduler else "Europe/Moscow"
         next_run = scheduler.get_next_run_time() if scheduler else "08:50"
 
+        tg_count = len(get_telegram_channels())
+        rss_count = len(get_rss_feeds())
+
         text = (
-            f"👋 *Привет! Я твой автономный ИИ-хаб (2026).*\n\n"
-            f"💻 *Ноутбук-сервер:* 🟢 24/7 Активен\n"
-            f"🖥 *Основной ПК (LM Studio):* {local_status}\n"
-            f"🧠 *Активный провайдер:* `{active_prov.upper()}`\n"
-            f"🎯 *Текущая модель:* `{current_model}`\n"
-            f"⏰ *Расписание:* `08:50 ({tz_name})`\n"
-            f"⏳ *Следующая сводка:* `{next_run}`\n"
-            f"💬 *Режим чата:* {'🟢 ВКЛЮЧЕН' if chat_active else '⚪️ Выключен'}\n\n"
-            f"Используйте кнопки ниже или меню команд ( [/] ) для управления:"
+            "🛡 <b>ТЕРМИНАЛ «АГЕНТ СНОУДЕН»</b> <code>[v2.6 // OSINT & TACTICAL INTEL]</code>\n"
+            "<i>Автономный контур стратегической аналитики и мониторинга обстановки</i>\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n"
+            "💻 <b>АППАРАТНЫЙ КОНТУР:</b>\n"
+            "• <b>Сервер (Ноутбук 24/7):</b> 🟢 В строю • Служба активна\n"
+            f"• <b>Рабочая станция (LM Studio):</b> {local_status}\n"
+            f"• <b>Ядро аналитики:</b> <code>{active_prov.upper()}</code> • <code>{current_model}</code>\n\n"
+            "📡 <b>РАЗВЕДЫВАТЕЛЬНЫЙ ПУЛ:</b>\n"
+            f"• <b>Источники:</b> {tg_count} Telegram-каналов • {rss_count} RSS-потоков\n"
+            "• <b>Специализация:</b> СВО & Хроника атак • Геополитика • Open-Source & Софт • Кибербезопасность\n"
+            f"• <b>Режим перехвата:</b> {'🧪 Тестовый (без фиксации в БД)' if is_test_mode else '🛡 Боевой (дедупликация и архив)'}\n\n"
+            "⏳ <b>ОПЕРАТИВНЫЙ БРИФИНГ:</b>\n"
+            f"• <b>Расписание:</b> <code>08:50 ({tz_name})</code>\n"
+            f"• <b>Следующая сводка:</b> <code>{next_run}</code>\n"
+            f"• <b>Диалоговый канал:</b> {'🟢 АКТИВЕН — я на связи' if chat_active else '⚪️ Режим ожидания'}\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "<i>«Конфиденциальность — это право, а осведомленность — лучшая защита».</i>\n"
+            "Выберите директиву на пульте или введите команду через <b>[/]</b>:"
         )
         await send_safe_reply(msg, text, reply_markup=get_main_menu_keyboard(chat_active, get_web_app_url()))
 
@@ -336,21 +349,22 @@ def split_telegram_html(text: str, max_chunk: int = 3800) -> List[str]:
             return
         await register_bot_commands(msg.bot)
         help_text = (
-            "📖 <b>Справочник команд и возможностей бота:</b>\n\n"
-            "💬 <b>Диалог и аналитика:</b>\n"
-            "• <code>/chat</code> — войти в режим прямого диалога с ИИ-аналитиком.\n"
-            "• <code>/exit</code> (или кнопка «Завершить диалог») — выйти из диалога в главное меню.\n"
-            "• В режиме чата бот собирает данные из всех каналов (@ross_name, @Dyadyabatya0, @rybar, РИА, ТАСС), объединяет факты в единый связанный абзац без дублей, выделяет ключевые фразы в <b>цитаты</b> и присылает <b>настоящие фотографии/видео</b> с места событий!\n\n"
-            "⚡️ <b>Сводки и новости:</b>\n"
-            "• <code>/digest</code> — немедленно сгенерировать глубокий аналитический дайджест со сравнительной таблицей и детальным разбором.\n"
-            "• <code>/refresh</code> — запустить оперативный сбор последних публикаций со всех каналов и лент.\n\n"
-            "⚙️ <b>Управление источниками и системой:</b>\n"
+            "📖 <b>Справочник команд терминала «Агент Сноуден»:</b>\n\n"
+            "💬 <b>Диалог и оперативная разведка:</b>\n"
+            "• <code>/chat</code> — войти в режим прямого диалога со Сноуденом.\n"
+            "• <code>/exit</code> — завершить диалог и вернуться к терминалу.\n"
+            "• В режиме чата Сноуден опрашивает все каналы (@ross_name, @Dyadyabatya0, @Voennaja_svodka, @infomil_live, РИА, ТАСС), объединяет факты без дублирования в единый насыщенный абзац, цитирует первоисточники через <b>цитаты</b> и отправляет <b>реальные фото/медиа альбомы</b> с места событий!\n\n"
+            "⚡️ <b>Сводки и аналитика:</b>\n"
+            "• <code>/digest</code> — немедленно сгенерировать утреннюю аналитическую сводку (СВО, геополитика, полезный софт, безопасность).\n"
+            "• <code>/refresh</code> — запустить оперативный опрос всех каналов и обновить базу публикаций прямо сейчас.\n\n"
+            "⚙️ <b>Управление источниками и ядром:</b>\n"
             "• <code>/sources</code> — список подключенных каналов и RSS.\n"
-            "• <code>/add_channel</code> — добавить Telegram-канал (поддерживаются @юзернейм, ссылки t.me, telega.in и инвайт-ссылки t.me/+...).\n"
-            "• <code>/add_rss</code> — добавить RSS-ленту новостей.\n"
+            "• <code>/add_channel</code> — добавить Telegram-канал (поддерживаются @юзернейм, ссылки t.me и инвайты t.me/+...).\n"
+            "• <code>/add_rss</code> — добавить RSS-ленту.\n"
             "• <code>/del_source</code> — удалить ненужный канал или ленту.\n"
-            "• <code>/status</code> — посмотреть статус локального ПК (LM Studio) и активной модели.\n"
-            "• <code>/test_mode</code> — переключить тестовый режим (вкл/выкл сохранение в БД).\n\n"
+            "• <code>/status</code> — статус оборудования и ядра ИИ.\n"
+            "• <code>/test_mode</code> — переключить тестовый режим (вкл/выкл запись в БД).\n"
+            "• <code>/clearnews</code> — полностью очистить базу новостей и тестовых дайджестов.\n\n"
             "<i>💡 Для вызова списка команд в любой момент нажимайте кнопку <b>«Меню» ( [/] )</b> в левом нижнем углу чата.</i>"
         )
         await send_safe_reply(msg, help_text, reply_markup=get_main_menu_keyboard(storage.is_chat_mode_active(), get_web_app_url()))
@@ -360,17 +374,36 @@ def split_telegram_html(text: str, max_chunk: int = 3800) -> List[str]:
         await call.answer()
         await state.clear()
         is_local_on = await llm_router.check_local_health()
-        local_status = "🟢 В сети (LM Studio)" if is_local_on else "🔴 Офлайн"
+        local_status = "🟢 В сети (LM Studio)" if is_local_on else "🔴 Офлайн (Включен облачный резерв)"
         active_prov = llm_router.active_provider
         current_model = llm_router.get_current_model_for_provider(active_prov if active_prov != "auto" else "openrouter")
         chat_active = storage.is_chat_mode_active()
+        is_test_mode = storage.is_test_mode()
+        tz_name = scheduler.timezone_name if scheduler else "Europe/Moscow"
+        next_run = scheduler.get_next_run_time() if scheduler else "08:50"
+
+        tg_count = len(get_telegram_channels())
+        rss_count = len(get_rss_feeds())
 
         text = (
-            f"🏠 *Главное меню управления ИИ-хабом:*\n\n"
-            f"💻 *Ноутбук:* 🟢 24/7 | 🖥 *ПК (LM Studio):* {local_status}\n"
-            f"🧠 *Провайдер:* `{active_prov.upper()}` (`{current_model}`)\n"
-            f"⏰ *Таймер сводки:* `08:50`\n"
-            f"💬 *Режим чата:* {'🟢 ВКЛЮЧЕН' if chat_active else '⚪️ Выключен'}"
+            "🛡 <b>ТЕРМИНАЛ «АГЕНТ СНОУДЕН»</b> <code>[v2.6 // OSINT & TACTICAL INTEL]</code>\n"
+            "<i>Автономный контур стратегической аналитики и мониторинга обстановки</i>\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n"
+            "💻 <b>АППАРАТНЫЙ КОНТУР:</b>\n"
+            "• <b>Сервер (Ноутбук 24/7):</b> 🟢 В строю • Служба активна\n"
+            f"• <b>Рабочая станция (LM Studio):</b> {local_status}\n"
+            f"• <b>Ядро аналитики:</b> <code>{active_prov.upper()}</code> • <code>{current_model}</code>\n\n"
+            "📡 <b>РАЗВЕДЫВАТЕЛЬНЫЙ ПУЛ:</b>\n"
+            f"• <b>Источники:</b> {tg_count} Telegram-каналов • {rss_count} RSS-потоков\n"
+            "• <b>Специализация:</b> СВО & Хроника атак • Геополитика • Open-Source & Софт • Кибербезопасность\n"
+            f"• <b>Режим перехвата:</b> {'🧪 Тестовый (без фиксации в БД)' if is_test_mode else '🛡 Боевой (дедупликация и архив)'}\n\n"
+            "⏳ <b>ОПЕРАТИВНЫЙ БРИФИНГ:</b>\n"
+            f"• <b>Расписание:</b> <code>08:50 ({tz_name})</code>\n"
+            f"• <b>Следующая сводка:</b> <code>{next_run}</code>\n"
+            f"• <b>Диалоговый канал:</b> {'🟢 АКТИВЕН — я на связи' if chat_active else '⚪️ Режим ожидания'}\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "<i>«Конфиденциальность — это право, а осведомленность — лучшая защита».</i>\n"
+            "Выберите директиву на пульте или введите команду через <b>[/]</b>:"
         )
         await safe_edit_text(call, text, get_main_menu_keyboard(chat_active, get_web_app_url()))
 
@@ -583,12 +616,22 @@ def split_telegram_html(text: str, max_chunk: int = 3800) -> List[str]:
         )
 
     # --------------------------------------------------------------------------
-    # Ручной запуск сбора свежих новостей: /refresh или /update
+    # Ручной запуск сбора свежих новостей: /refresh или /update или кнопка
     # --------------------------------------------------------------------------
     @r.message(Command("refresh", "update", "collect"))
-    async def cmd_refresh_news(msg: Message):
-        if not is_admin(msg.from_user.id):
+    @r.callback_query(F.data == "btn_refresh_now")
+    async def cmd_refresh_news(event: Message | CallbackQuery):
+        user_id = event.from_user.id
+        if not is_admin(user_id):
+            if isinstance(event, CallbackQuery):
+                await event.answer("⛔️ Доступ ограничен", show_alert=True)
             return
+
+        if isinstance(event, CallbackQuery):
+            await event.answer("Инициализация оперативного сбора...")
+            msg = event.message
+        else:
+            msg = event
 
         wait_msg = await msg.answer(
             "🔄 <b>[1/3] Запуск сбора свежих публикаций...</b>\n"
