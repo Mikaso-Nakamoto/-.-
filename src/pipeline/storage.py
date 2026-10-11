@@ -189,11 +189,33 @@ class Storage:
             conn.execute("DELETE FROM full_digests")
             conn.execute("DELETE FROM digest_history")
             conn.execute("DELETE FROM chat_history")
+            conn.execute("DELETE FROM user_feedback")
             conn.commit()
             try:
                 conn.execute("VACUUM")
             except Exception:
                 pass
+
+        # Удаляем локальные сгенерированные файлы дайджестов
+        from pathlib import Path
+        digests_dir = Path("data/digests")
+        if digests_dir.exists():
+            for f in digests_dir.glob("*.*"):
+                try:
+                    f.unlink()
+                except Exception:
+                    pass
+
+    def check_and_apply_one_time_clean(self, migration_key: str = "db_cleaned_commit_v2") -> bool:
+        """
+        Выполняет автоматическую однократную очистку БД и истории диалогов
+        при развертывании коммита, сохраняя настройки пользователя (admin_id, модели, провайдеры).
+        """
+        if not self.get_setting(migration_key):
+            self.purge_all_news_and_digests()
+            self.set_setting(migration_key, "completed")
+            return True
+        return False
 
     def is_youtube_video_seen(self, video_url: str) -> bool:
         """Проверяет, было ли уже отправлено уведомление об этом видео"""

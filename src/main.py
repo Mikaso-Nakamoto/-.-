@@ -29,6 +29,10 @@ async def main():
     # Инициализация хранилища (SQLite WAL)
     storage = Storage(cfg.storage.db_path)
 
+    # Проверка однократной зачистки БД и истории диалогов для чистого старта
+    if storage.check_and_apply_one_time_clean():
+        logger.info("🧹 Выполнена автоматическая очистка базы данных и истории диалогов для чистого старта!")
+
     # Инициализация роутера LLM
     saved_provider = storage.get_setting("active_provider")
     if saved_provider:
