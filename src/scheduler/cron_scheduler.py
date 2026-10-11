@@ -255,45 +255,62 @@ class DigestScheduler:
                 try:
                     ai_prompt = (
                         f"Текст заявления Дмитрия Медведева:\n{content[:3000]}\n\n"
-                        "Сделай емкий экспресс-анализ в 2-3 предложениях на русском языке: "
-                        "каков ключевой политический посыл, кому адресован сигнал и какие прямые последствия озвучены."
+                        "Сделай краткий экспресс-анализ заявления в 2-3 предложениях на русском языке: "
+                        "каков ключевой политический посыл, кому адресован сигнал и какие прямые последствия озвучены.\n\n"
+                        "СТРОЖАЙШИЕ ПРАВИЛА:\n"
+                        "1. Выдай ТОЛЬКО чистый текст анализа (2-3 предложения).\n"
+                        "2. КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО повторять или повторно цитировать текст заявления (оно уже выведено пользователю).\n"
+                        "3. КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО добавлять блоки цитат <blockquote>, подписи '— @канал', 'Источники: [@канал](ссылка)' или любые шаблоны.\n"
+                        "4. Начинай сразу с анализа сути без лишних вводных слов."
                     )
                     res = await self.builder.router.generate_response(
                         task="chat",
                         user_prompt=ai_prompt,
-                        override_system_prompt="Ты высококлассный аналитик геополитики. Выдели главное зерно заявления Дмитрия Медведева без лишней воды."
+                        override_system_prompt=(
+                            "Ты высококлассный геополитический аналитик. "
+                            "Выдели главное зерно заявления Дмитрия Медведева в 2-3 емких предложениях. "
+                            "Не используй шаблонные заглушки, повторные цитаты или фиктивные ссылки на источники."
+                        )
                     )
                     if res.get("success"):
-                        ai_analysis = res.get("content", "").strip()
+                        raw_analysis = res.get("content", "").strip()
+                        # Очищаем от шаблонных галлюцинаций моделей (@канал, [@канал](ссылка), повторных blockquote)
+                        raw_analysis = re.sub(r'<blockquote[^>]*>.*?</blockquote>\s*—?\s*@?[а-яa-z0-9_-]*', '', raw_analysis, flags=re.DOTALL | re.IGNORECASE)
+                        raw_analysis = re.sub(r'<blockquote[^>]*>.*?</blockquote>', '', raw_analysis, flags=re.DOTALL)
+                        raw_analysis = re.sub(r'—?\s*Источники:\s*\[?@?канал\d*\]?\(?[^\)\n]*\)?', '', raw_analysis, flags=re.IGNORECASE)
+                        raw_analysis = re.sub(r'\[@?канал\d*\]\((?:ссылка|url\d*)\)', '', raw_analysis, flags=re.IGNORECASE)
+                        raw_analysis = re.sub(r'—?\s*@канал\b', '', raw_analysis, flags=re.IGNORECASE)
+                        raw_analysis = re.sub(r'\n{3,}', '\n\n', raw_analysis)
+                        ai_analysis = raw_analysis.strip()
                 except Exception as ai_err:
                     logger.warning(f"ИИ-анализ поста Медведева: {ai_err}")
 
-                    msg_text = (
-                        "⚡️ <b>Дмитрий Анатольевич вещает!</b>\n\n"
-                        f"<blockquote>{html.escape(content)}</blockquote>\n\n"
-                    )
-                    if ai_analysis:
-                        msg_text += f"🧠 <b>Анализ ИИ:</b>\n<i>{html.escape(ai_analysis)}</i>\n\n"
+                msg_text = (
+                    "⚡️ <b>Дмитрий Анатольевич вещает!</b>\n\n"
+                    f"<blockquote>{html.escape(content)}</blockquote>\n\n"
+                )
+                if ai_analysis:
+                    msg_text += f"🧠 <b>Анализ ИИ:</b>\n<i>{html.escape(ai_analysis)}</i>\n\n"
 
-                    msg_text += f"🔗 <a href=\"{url}\">Оригинальный пост в канале @medvedev_telegram</a>"
+                msg_text += f"🔗 <a href=\"{url}\">Оригинальный пост в канале @medvedev_telegram</a>"
 
-                    photo_file = None
-                    if it.get("image_url"):
-                        photo_file = await download_image_as_input_file(it["image_url"])
+                photo_file = None
+                if it.get("image_url"):
+                    photo_file = await download_image_as_input_file(it["image_url"])
 
-                    from src.bot.handlers import split_telegram_html
-                    chunks = split_telegram_html(msg_text, max_chunk=3800)
+                from src.bot.handlers import split_telegram_html
+                chunks = split_telegram_html(msg_text, max_chunk=3800)
 
-                    if photo_file and len(chunks) == 1 and len(chunks[0]) <= 1024:
-                        await self.bot.send_photo(target_admin, photo=photo_file, caption=chunks[0], parse_mode="HTML")
-                    else:
-                        if photo_file:
-                            try:
-                                await self.bot.send_photo(target_admin, photo=photo_file)
-                            except Exception:
-                                pass
-                        for chunk in chunks:
-                            await self.bot.send_message(target_admin, chunk, parse_mode="HTML")
+                if photo_file and len(chunks) == 1 and len(chunks[0]) <= 1024:
+                    await self.bot.send_photo(target_admin, photo=photo_file, caption=chunks[0], parse_mode="HTML")
+                else:
+                    if photo_file:
+                        try:
+                            await self.bot.send_photo(target_admin, photo=photo_file)
+                        except Exception:
+                            pass
+                    for chunk in chunks:
+                        await self.bot.send_message(target_admin, chunk, parse_mode="HTML")
         except Exception as e:
             logger.error(f"Ошибка в трекере @medvedev_telegram: {e}")
 
