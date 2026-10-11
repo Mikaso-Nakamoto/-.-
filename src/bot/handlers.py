@@ -2,6 +2,7 @@ import logging
 import os
 import re
 import html
+import time
 import httpx
 from typing import List, Dict, Any, Optional
 from pathlib import Path
@@ -98,6 +99,55 @@ async def download_images_as_media_group(urls: List[str], max_count: int = 6) ->
         if isinstance(r, BufferedInputFile):
             media_items.append(InputMediaPhoto(media=r))
     return media_items
+
+class LiveProgressAnimator:
+    """
+    Фоновый аниматор живого прогресса в реальном времени для Telegram.
+    Регулярно обновляет сообщение (переворачивающиеся песочные часы ⏳ ⌛️, секундомер, статус)
+    каждые 1.6 сек без риска превышения лимитов Telegram.
+    """
+    def __init__(self, message: Message, initial_text: str = "Инициализация..."):
+        self.message = message
+        self.base_text = initial_text
+        self.is_running = True
+        self.start_time = time.time()
+        self.task: Optional[asyncio.Task] = None
+        self.frames = ["⏳", "⌛️"]
+        self.frame_idx = 0
+
+    def update_text(self, text: str):
+        self.base_text = text
+
+    async def _animate_loop(self):
+        while self.is_running:
+            self.frame_idx = (self.frame_idx + 1) % len(self.frames)
+            icon = self.frames[self.frame_idx]
+            elapsed = int(time.time() - self.start_time)
+
+            # Очищаем base_text от ведущих иконок и статических спиннеров
+            cleaned = re.sub(r'^[⏳⌛️\s\U0001F6E1\U0001F4E1\U0001F50D\U0001F9E0\U00002728\U0001F504]+', '', self.base_text)
+            cleaned = re.sub(r'[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]', '', cleaned).strip()
+
+            animated_text = f"{icon} {cleaned}\n\n<i>⏱ В процессе: {elapsed} сек.</i>"
+
+            try:
+                await self.message.edit_text(animated_text, parse_mode="HTML")
+            except Exception:
+                pass
+
+            await asyncio.sleep(1.6)
+
+    def start(self):
+        self.task = asyncio.create_task(self._animate_loop())
+
+    async def stop(self):
+        self.is_running = False
+        if self.task:
+            self.task.cancel()
+            try:
+                await self.task
+            except asyncio.CancelledError:
+                pass
 
 from src.llm.router import LLMRouter
 from src.llm.prompts import markdown_to_telegram_html
@@ -481,19 +531,21 @@ def build_snowden_menu_text(
         if isinstance(event, CallbackQuery):
             await event.answer("Сбор публикаций и генерация дайджеста...")
 
-        wait_msg = await msg.answer("⏳ <i>Инициализация сбора публикаций... ⠋</i>", parse_mode="HTML")
+        wait_msg = await msg.answer("⏳ <b>[1/4] Сбор публикаций...</b>\n<i>Опрашиваю Telegram-каналы и RSS-ленты...</i>", parse_mode="HTML")
+        animator = LiveProgressAnimator(wait_msg, "<b>[1/4] Сбор публикаций...</b>\n<i>Опрашиваю Telegram-каналы и RSS-ленты...</i>")
+        animator.start()
 
         async def update_progress(text: str):
+            animator.update_text(text)
+
+        try:
+            res = await digest_builder.generate_digest(on_progress=update_progress)
+        finally:
+            await animator.stop()
             try:
-                await wait_msg.edit_text(text, parse_mode="HTML")
+                await wait_msg.delete()
             except Exception:
                 pass
-
-        res = await digest_builder.generate_digest(on_progress=update_progress)
-        try:
-            await wait_msg.delete()
-        except Exception:
-            pass
 
         if not res.get("success"):
             await send_safe_reply(msg, f"⚠️ {res.get('text')}")
@@ -645,25 +697,28 @@ def build_snowden_menu_text(
             msg = event
 
         wait_msg = await msg.answer(
-            "🔄 <b>[1/3] Запуск сбора свежих публикаций...</b>\n"
-            "<i>Опрашиваю Telegram-каналы и RSS-ленты... ⠋</i>",
+            "⏳ <b>[1/2] Запуск сбора свежих публикаций...</b>\n"
+            "<i>Опрашиваю Telegram-каналы и RSS-ленты...</i>",
             parse_mode="HTML"
         )
+        animator = LiveProgressAnimator(
+            wait_msg,
+            "<b>[1/2] Запуск сбора свежих публикаций...</b>\n<i>Опрашиваю Telegram-каналы и RSS-ленты...</i>"
+        )
+        animator.start()
 
         try:
             items = await digest_builder.collect_fresh_news()
+            animator.update_text(
+                "<b>[2/2] Синхронизация оперативного хранилища...</b>\n"
+                f"<i>Сохраняю {len(items)} публикаций в буфер поиска...</i>"
+            )
+            await asyncio.sleep(0.6)
+        finally:
+            await animator.stop()
 
-            try:
-                await wait_msg.edit_text(
-                    "💾 <b>[2/3] Синхронизация оперативного хранилища...</b>\n"
-                    f"<i>Сохраняю {len(items)} публикаций в буфер поиска... ⠹</i>",
-                    parse_mode="HTML"
-                )
-            except Exception:
-                pass
-
-            await asyncio.sleep(0.4)
-            test_status = " <i>(Включен тестовый режим: БД не засоряется)</i>" if storage.is_test_mode() else ""
+        test_status = " <i>(Включен тестовый режим: БД не засоряется)</i>" if storage.is_test_mode() else ""
+        try:
             await wait_msg.edit_text(
                 f"✅ <b>Сбор публикаций успешно завершен!</b>\n\n"
                 f"📥 Собрано свежих материалов: <b>{len(items)}</b>\n"
