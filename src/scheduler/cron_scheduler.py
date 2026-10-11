@@ -85,9 +85,8 @@ class DigestScheduler:
             html_path = res.get("full_report_html_path")
             md_path = res.get("full_report_md_path")
             md_file_id = Path(md_path).name if md_path else None
-            web_app_url = os.getenv("WEB_APP_URL") or "http://192.168.0.169:8000"
 
-            kb = get_digest_feedback_keyboard(web_app_url=web_app_url, md_file_id=md_file_id)
+            kb = get_digest_feedback_keyboard(md_file_id=md_file_id)
 
             greeting = f"☀️ <b>Доброе утро! Ваша аналитическая сводка на 08:50 ({self.timezone_name}):</b>\n\n"
             full_post = greeting + post_html

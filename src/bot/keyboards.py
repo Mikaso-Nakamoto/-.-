@@ -1,8 +1,8 @@
 from typing import Optional
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from src.llm.router import POPULAR_MODELS
 
-def get_main_menu_keyboard(chat_mode: bool = False, web_app_url: Optional[str] = None) -> InlineKeyboardMarkup:
+def get_main_menu_keyboard(chat_mode: bool = False, **kwargs) -> InlineKeyboardMarkup:
     first_row = [
         InlineKeyboardButton(text="⚡️ Сводка", callback_data="btn_run_digest"),
         InlineKeyboardButton(text="🗺 Карта СВО", callback_data="btn_military_summary")
@@ -12,14 +12,7 @@ def get_main_menu_keyboard(chat_mode: bool = False, web_app_url: Optional[str] =
         InlineKeyboardButton(text="🔄 Обновить ленту", callback_data="btn_refresh_now")
     ]
 
-    rows = [first_row, second_row]
-
-    if web_app_url and str(web_app_url).strip():
-        clean_url = str(web_app_url).strip()
-        if clean_url.lower().startswith("https://"):
-            rows.append([InlineKeyboardButton(text="📱 Открыть терминал (Web)", web_app=WebAppInfo(url=clean_url))])
-
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+    return InlineKeyboardMarkup(inline_keyboard=[first_row, second_row])
 
 def get_chat_control_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -46,7 +39,7 @@ def get_search_result_keyboard(is_google_ai_enabled: bool = False) -> InlineKeyb
         [InlineKeyboardButton(text="🏠 Главное меню", callback_data="btn_menu")]
     ])
 
-def get_digest_feedback_keyboard(web_app_url: Optional[str] = None, md_file_id: Optional[str] = None) -> Optional[InlineKeyboardMarkup]:
+def get_digest_feedback_keyboard(md_file_id: Optional[str] = None, **kwargs) -> Optional[InlineKeyboardMarkup]:
     if md_file_id:
         return InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📄 Скачать исходный .MD", callback_data=f"getmd__{md_file_id}")]

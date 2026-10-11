@@ -291,10 +291,6 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
             return True
         return user_id == configured_admin_id
 
-    def get_web_app_url() -> str | None:
-        url = os.getenv("WEB_APP_URL", "").strip()
-        return url or "http://192.168.0.169:8000"
-
     async def safe_edit_text(call: CallbackQuery, text: str, reply_markup=None):
         try:
             await call.answer()
@@ -370,10 +366,10 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
             await state.clear()
             chat_active = storage.is_chat_mode_active()
             text = build_snowden_menu_text()
-            await send_safe_reply(msg, text, reply_markup=get_main_menu_keyboard(chat_active, get_web_app_url()))
+            await send_safe_reply(msg, text, reply_markup=get_main_menu_keyboard(chat_active))
         except Exception as e:
             logger.error(f"Ошибка в cmd_start_msg: {e}")
-            await msg.answer("🕶 <b>Аналитический агент Сноуден</b>", parse_mode="HTML", reply_markup=get_main_menu_keyboard(True, get_web_app_url()))
+            await msg.answer("🕶 <b>Аналитический агент Сноуден</b>", parse_mode="HTML", reply_markup=get_main_menu_keyboard(True))
 
     @r.message(Command("help"))
     @r.message(F.text.func(lambda t: bool(t and re.match(r'^(?:/help|/справка|/помощь|помощь|справка|инструкция)(?:\s|$)', t.strip(), re.IGNORECASE))))
@@ -397,7 +393,7 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
             "• <code>/start</code> — главное интерактивное меню\n\n"
             "💬 <i>Вы можете в любой момент написать любой вопрос в чат — ИИ проанализирует контекст ваших каналов и выдаст развернутый ответ!</i>"
         )
-        await send_safe_reply(msg, help_text, reply_markup=get_main_menu_keyboard(storage.is_chat_mode_active(), get_web_app_url()))
+        await send_safe_reply(msg, help_text, reply_markup=get_main_menu_keyboard(storage.is_chat_mode_active()))
 
     @r.callback_query(F.data == "btn_menu")
     async def cb_main_menu(call: CallbackQuery, state: FSMContext):
@@ -405,7 +401,7 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
         await state.clear()
         chat_active = storage.is_chat_mode_active()
         text = build_snowden_menu_text()
-        await safe_edit_text(call, text, get_main_menu_keyboard(chat_active, get_web_app_url()))
+        await safe_edit_text(call, text, get_main_menu_keyboard(chat_active))
 
     # --------------------------------------------------------------------------
     # Прямой чат (Чат открыт всегда: статус / очистка памяти / возврат в меню)
@@ -428,7 +424,7 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
     async def cmd_exit(msg: Message, state: FSMContext):
         await state.clear()
         text = build_snowden_menu_text()
-        await send_safe_reply(msg, text, reply_markup=get_main_menu_keyboard(chat_mode=False, web_app_url=get_web_app_url()))
+        await send_safe_reply(msg, text, reply_markup=get_main_menu_keyboard(chat_mode=False))
 
     @r.message(Command("clear"))
     @r.callback_query(F.data == "btn_chat_clear")
@@ -484,8 +480,8 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
         md_path = res.get("full_report_md_path")
         md_file_id = Path(md_path).name if md_path else None
 
-        # Кнопки под постом: Оценка, Чат, Окно в TG, Скачать MD
-        kb = get_digest_feedback_keyboard(web_app_url=get_web_app_url(), md_file_id=md_file_id)
+        # Кнопки под постом: Скачать MD (если доступен)
+        kb = get_digest_feedback_keyboard(md_file_id=md_file_id)
 
         # 1. Загружаем и отправляем альбом (медиагруппу) из разных фото/видео источников одним сообщением-коллажем!
         source_images = res.get("source_images") or ([lead_img] if lead_img else [])
@@ -1406,9 +1402,9 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
         )
         if isinstance(event, CallbackQuery):
             await event.answer()
-            await safe_edit_text(event, text, get_main_menu_keyboard(storage.is_chat_mode_active(), get_web_app_url()))
+            await safe_edit_text(event, text, get_main_menu_keyboard(storage.is_chat_mode_active()))
         else:
-            await send_safe_reply(event, text, reply_markup=get_main_menu_keyboard(storage.is_chat_mode_active(), get_web_app_url()))
+            await send_safe_reply(event, text, reply_markup=get_main_menu_keyboard(storage.is_chat_mode_active()))
 
     # --------------------------------------------------------------------------
     # Ручная установка любой модели: /setmodel <provider> <model_slug>
@@ -1580,7 +1576,7 @@ def setup_router(digest_builder: DigestBuilder, llm_router: LLMRouter, storage: 
                     pass
                 if res.get("success"):
                     formatted_html = format_digest_to_collapsible_html(res.get("text", ""))
-                    await send_safe_reply(msg, formatted_html, reply_markup=get_main_menu_keyboard(chat_mode=True, web_app_url=get_web_app_url()))
+                    await send_safe_reply(msg, formatted_html, reply_markup=get_main_menu_keyboard(chat_mode=True))
                 else:
                     await send_safe_reply(msg, f"⚠️ Не удалось сформировать сводку: {res.get('text')}")
             except Exception as e:

@@ -56,6 +56,12 @@ sources:
     category: Разработка & IT-образование
   - username: bugfeature
     category: Разработка & OpenSource
+  - username: neuralmeduza
+    category: Нейросети и ИИ
+  - username: tproger_official
+    category: IT & Технологии
+  - username: open_source_ru
+    category: OpenSource & GitHub
   - username: mod_russia
     category: Минобороны РФ & СВО
   rss_feeds:
@@ -68,6 +74,12 @@ sources:
   - url: https://habr.com/ru/rss/hubs/all/
     name: Habr Все публикации
     category: IT & Разработка
+  - url: https://habr.com/ru/rss/hub/artificial_intelligence/all/
+    name: Habr Нейросети и ИИ
+    category: Нейросети и ИИ
+  - url: https://habr.com/ru/rss/hub/open_source/all/
+    name: Habr Open Source & GitHub
+    category: OpenSource & Полезный софт
   - url: https://3dnews.ru/news/rss/
     name: 3DNews Daily
     category: Hardware & GPU

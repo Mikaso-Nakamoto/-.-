@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import sys
-import uvicorn
 from aiogram import Bot, Dispatcher
 from src.config import load_app_config
 from src.pipeline.storage import Storage
@@ -9,7 +8,6 @@ from src.llm.router import LLMRouter
 from src.pipeline.digest_builder import DigestBuilder
 from src.scheduler.cron_scheduler import DigestScheduler
 from src.bot.handlers import setup_router, register_bot_commands
-from src.api.server import create_app
 
 logging.basicConfig(
     level=logging.INFO,
@@ -63,17 +61,9 @@ async def main():
     router = setup_router(digest_builder, llm_router, storage, cfg.bot.admin_id, scheduler)
     dp.include_router(router)
 
-    # Инициализация Web/PWA сервера на FastAPI
-    api_app = create_app(storage, llm_router, digest_builder)
-    uv_cfg = uvicorn.Config(app=api_app, host="0.0.0.0", port=8000, log_level="warning")
-    web_server = uvicorn.Server(uv_cfg)
-
-    logger.info("🚀 Автономный ИИ-хаб и Web/PWA интерфейс запущены (порт 8000)!")
+    logger.info("🚀 Автономный ИИ-агент Сноуден успешно запущен и ожидает команды в Telegram!")
     try:
-        await asyncio.gather(
-            dp.start_polling(bot),
-            web_server.serve()
-        )
+        await dp.start_polling(bot)
     finally:
         scheduler.stop()
         await bot.session.close()

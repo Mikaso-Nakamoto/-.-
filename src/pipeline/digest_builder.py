@@ -65,7 +65,9 @@ class DigestBuilder:
             "ross_name", "dyadyabatya0", "rybar", "rostov_tsargrad",
             "voennaja_svodka", "infomil_live", "medvedev_telegram",
             "mod_russia", "militarysummary",
+            "ai_newz", "ai_machinelearning_big_data",
             "it_shelter", "github_radar", "prepodsteam", "bugfeature",
+            "dev_bubble", "habr_com", "rozetked", "proglib",
             "cyberpolice_rus", "xakep_ru"
         }
 
@@ -121,12 +123,12 @@ class DigestBuilder:
 
     async def curate_items_with_ai(self, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
-        Отбирает сбалансированный срез публикаций с учетом контекстного бюджета активной модели:
-        - Для локальной Qwen 2.5 (LM Studio, контекст 8k): 14–16 публикаций (~4 500 токенов).
-        - Для облачных шлюзов (Gemini, OpenRouter): до 28–32 публикаций.
+        Отбирает сбалансированный срез публикаций с упором на технологии, ИИ и открытый софт:
+        - Для локальной Qwen 2.5 (LM Studio): 18–22 публикации.
+        - Для облачных шлюзов (Gemini, OpenRouter, Groq): 35–42 публикации.
         """
         is_local = (self.router.active_provider == "local")
-        target_count = 15 if is_local else 30
+        target_count = 20 if is_local else 40
 
         return self._stratified_balance_items(items, target_count=target_count)
 
@@ -523,7 +525,7 @@ class DigestBuilder:
         # ЭТАП 2: LLM Синтезатор аналитического дайджеста
         # Формируем сырой текст для LLM с полной фактурой и с учетом лимита контекста модели
         is_local = (self.router.active_provider == "local")
-        max_content_len = 650 if is_local else 900
+        max_content_len = 800 if is_local else 1400
 
         raw_chunks = []
         for i, it in enumerate(curated_items, 1):

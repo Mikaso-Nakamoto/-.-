@@ -1,128 +1,124 @@
-# Источники для сбора информации
 sources:
   telegram_channels:
-    # Технологии, ИИ и Инфобез (включая Хакер.ру)
-    - username: "ai_newz"
-      category: "Нейросети и ИИ"
-    - username: "ai_machinelearning_big_data"
-      category: "Нейросети и ИИ"
-    - username: "xakep_ru"
-      category: "Кибербезопасность & IT"
-    - username: "hacker_magazine"
-      category: "Кибербезопасность & IT"
-    - username: "study_security"
-      category: "Кибербезопасность & OSINT"
-    - username: "exploitex"
-      category: "Кибербезопасность & IT"
-    - username: "cyberpolice_rus"
-      category: "Кибербезопасность & Право"
-    - username: "Dev_Bubble"
-      category: "DevOps & Разработка"
-    - username: "habr_com"
-      category: "DevOps & Разработка"
-    - username: "rozetked"
-      category: "Hardware & Гаджеты"
-    - username: "proglib"
-      category: "Разработка и GameDev"
-    - username: "it_shelter"
-      category: "OpenSource & Полезный софт"
-    - username: "github_radar"
-      category: "GitHub & Разработка"
-    - username: "prepodsteam"
-      category: "Разработка & IT-образование"
-    - username: "bugfeature"
-      category: "Разработка & OpenSource"
-
-    # Российские федеральные и новостные каналы (СВО, политика РФ)
-    - username: "rian_ru"
-      category: "Мировая политика & Новости"
-    - username: "tass_agency"
-      category: "Мировая политика & Новости"
-    - username: "kommersant"
-      category: "Международная аналитика"
-    - username: "rbc_news"
-      category: "Мировая политика & Новости"
-    - username: "rybar"
-      category: "Военно-политическая аналитика"
-    - username: "ross_name"
-      category: "Военно-политическая аналитика & СВО"
-    - username: "Dyadyabatya0"
-      category: "Военно-политическая аналитика & СВО"
-    - username: "Voennaja_svodka"
-      category: "Военная хроника & СВО"
-    - username: "militarysummary"
-      category: "Карта СВО & Military Summary"
-    - username: "mod_russia"
-      category: "Минобороны РФ & СВО"
-    - username: "infomil_live"
-      category: "Военно-техническая аналитика & СВО"
-    - username: "medvedev_telegram"
-      category: "Заявления & Геополитика"
-    - username: "rostov_tsargrad"
-      category: "Новости Юга & Регионы России"
-
-    # Западные и международные каналы
-    - username: "bbcrussian"
-      category: "Международная аналитика"
-
+  - username: ai_newz
+    category: Нейросети и ИИ
+  - username: ai_machinelearning_big_data
+    category: Нейросети и ИИ
+  - username: xakep_ru
+    category: Кибербезопасность & IT
+  - username: hacker_magazine
+    category: Кибербезопасность & IT
+  - username: study_security
+    category: Кибербезопасность & OSINT
+  - username: exploitex
+    category: Кибербезопасность & IT
+  - username: cyberpolice_rus
+    category: Кибербезопасность & Право
+  - username: Dev_Bubble
+    category: DevOps & Разработка
+  - username: habr_com
+    category: DevOps & Разработка
+  - username: rozetked
+    category: Hardware & Гаджеты
+  - username: proglib
+    category: Разработка и GameDev
+  - username: it_shelter
+    category: OpenSource & Полезный софт
+  - username: github_radar
+    category: GitHub & Разработка
+  - username: rian_ru
+    category: Мировая политика & Новости
+  - username: tass_agency
+    category: Мировая политика & Новости
+  - username: kommersant
+    category: Международная аналитика
+  - username: rbc_news
+    category: Мировая политика & Новости
+  - username: rybar
+    category: Военно-политическая аналитика
+  - username: ross_name
+    category: Военно-политическая аналитика & СВО
+  - username: Dyadyabatya0
+    category: Военно-политическая аналитика & СВО
+  - username: Voennaja_svodka
+    category: Военная хроника & СВО
+  - username: militarysummary
+    category: Карта СВО & Military Summary
+  - username: infomil_live
+    category: Военно-техническая аналитика & СВО
+  - username: medvedev_telegram
+    category: Заявления & Геополитика
+  - username: rostov_tsargrad
+    category: Новости Юга & Регионы России
+  - username: bbcrussian
+    category: Международная аналитика
+  - username: prepodsteam
+    category: Разработка & IT-образование
+  - username: bugfeature
+    category: Разработка & OpenSource
+  - username: neuralmeduza
+    category: Нейросети и ИИ
+  - username: tproger_official
+    category: IT & Технологии
+  - username: open_source_ru
+    category: OpenSource & GitHub
+  - username: mod_russia
+    category: Минобороны РФ & СВО
   rss_feeds:
-    # Региональные и федеральные СМИ
-    - url: "https://rostov.tsargrad.tv/rss"
-      name: "Царьград Ростов"
-      category: "Новости Юга & Регионы России"
-
-    # IT, Инфобез и Технологии (Хакер.ру, OpenNet, 3DNews, Habr, ArsTechnica)
-    - url: "https://xakep.ru/feed/"
-      name: "Журнал Хакер"
-      category: "Кибербезопасность & IT"
-    - url: "https://habr.com/ru/rss/hubs/all/"
-      name: "Habr Все публикации"
-      category: "IT & Разработка"
-    - url: "https://3dnews.ru/news/rss/"
-      name: "3DNews Daily"
-      category: "Hardware & GPU"
-    - url: "https://www.opennet.ru/opennews/opennews_all.rss"
-      name: "OpenNet Linux"
-      category: "DevOps & Linux"
-    - url: "https://www.bleepingcomputer.com/feed/"
-      name: "BleepingComputer"
-      category: "Кибербезопасность & IT"
-    - url: "https://feeds.arstechnica.com/arstechnica/index/"
-      name: "Ars Technica"
-      category: "Западные технологии & Наука"
-
-    # Российские федеральные и деловые издания (Внутренняя и внешняя политика, Украина)
-    - url: "https://www.kommersant.ru/RSS/news.xml"
-      name: "Коммерсантъ Главное"
-      category: "Международная аналитика"
-    - url: "https://rssexport.rbc.ru/rbcnews/news/30/full.rss"
-      name: "РБК Главные новости"
-      category: "Мировая политика & Новости"
-    - url: "https://ria.ru/export/rss2/archive/index.xml"
-      name: "РИА Новости Лента"
-      category: "Мировая политика & Новости"
-    - url: "https://www.vedomosti.ru/rss/news"
-      name: "Ведомости Новости"
-      category: "Экономика и Политика"
-
-    # Западные мировые агентства (позиция США, Европы, НАТО)
-    - url: "https://feeds.bbci.co.uk/news/world/rss.xml"
-      name: "BBC World News"
-      category: "Международная аналитика"
-    - url: "https://rss.dw.com/rdf/rss-ru-all"
-      name: "Deutsche Welle (RU)"
-      category: "Западные мировые медиа"
-    - url: "https://ru.euronews.com/rss"
-      name: "Euronews (RU)"
-      category: "Западные мировые медиа"
-
-    # Китайские и азиатские агентства (позиция КНР и Азии)
-    - url: "http://russian.news.cn/rss/world.xml"
-      name: "Синьхуа (Xinhua RU)"
-      category: "Китай & Азия"
-    - url: "http://russian.people.com.cn/rss/85173.xml"
-      name: "Жэньминь Жибао (RU)"
-      category: "Китай & Азия"
-    - url: "https://russian.cgtn.com/rss/news.xml"
-      name: "CGTN Russian"
-      category: "Китай & Азия"
+  - url: https://rostov.tsargrad.tv/rss
+    name: Царьград Ростов
+    category: Новости Юга & Регионы России
+  - url: https://xakep.ru/feed/
+    name: Журнал Хакер
+    category: Кибербезопасность & IT
+  - url: https://habr.com/ru/rss/hubs/all/
+    name: Habr Все публикации
+    category: IT & Разработка
+  - url: https://habr.com/ru/rss/hub/artificial_intelligence/all/
+    name: Habr Нейросети и ИИ
+    category: Нейросети и ИИ
+  - url: https://habr.com/ru/rss/hub/open_source/all/
+    name: Habr Open Source & GitHub
+    category: OpenSource & Полезный софт
+  - url: https://3dnews.ru/news/rss/
+    name: 3DNews Daily
+    category: Hardware & GPU
+  - url: https://www.opennet.ru/opennews/opennews_all.rss
+    name: OpenNet Linux
+    category: DevOps & Linux
+  - url: https://www.bleepingcomputer.com/feed/
+    name: BleepingComputer
+    category: Кибербезопасность & IT
+  - url: https://feeds.arstechnica.com/arstechnica/index/
+    name: Ars Technica
+    category: Западные технологии & Наука
+  - url: https://www.kommersant.ru/RSS/news.xml
+    name: Коммерсантъ Главное
+    category: Международная аналитика
+  - url: https://rssexport.rbc.ru/rbcnews/news/30/full.rss
+    name: РБК Главные новости
+    category: Мировая политика & Новости
+  - url: https://ria.ru/export/rss2/archive/index.xml
+    name: РИА Новости Лента
+    category: Мировая политика & Новости
+  - url: https://www.vedomosti.ru/rss/news
+    name: Ведомости Новости
+    category: Экономика и Политика
+  - url: https://feeds.bbci.co.uk/news/world/rss.xml
+    name: BBC World News
+    category: Международная аналитика
+  - url: https://rss.dw.com/rdf/rss-ru-all
+    name: Deutsche Welle (RU)
+    category: Западные мировые медиа
+  - url: https://ru.euronews.com/rss
+    name: Euronews (RU)
+    category: Западные мировые медиа
+  - url: http://russian.news.cn/rss/world.xml
+    name: Синьхуа (Xinhua RU)
+    category: Китай & Азия
+  - url: http://russian.people.com.cn/rss/85173.xml
+    name: Жэньминь Жибао (RU)
+    category: Китай & Азия
+  - url: https://russian.cgtn.com/rss/news.xml
+    name: CGTN Russian
+    category: Китай & Азия
