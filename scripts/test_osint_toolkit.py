@@ -90,12 +90,22 @@ async def run_osint_tests():
 
     phone_rep = toolkit._build_fallback_report("+79991234567", {
         "type": "phone",
+        "category": "mobile",
+        "is_mobile": True,
         "country": "Россия",
         "carrier": "МегаФон",
-        "search_links": ["https://t.me/+79991234567"]
+        "search_links": [{"name": "Telegram", "url": "https://t.me/+79991234567"}]
     })
     assert "МегаФон" in phone_rep
     assert "Россия" in phone_rep
+
+    # Toll-Free Presidential Administration test
+    toll_free_data = await toolkit.investigate_phone("88002002316")
+    assert toll_free_data["category"] == "toll_free"
+    assert toll_free_data["is_mobile"] is False
+    assert "Администрация Президента" in toll_free_data["verified_organization"]
+    assert not any("Telegram" in l["name"] for l in toll_free_data["search_links"])
+    print("✓ Toll-Free Russian 8-800 federal lines identified properly.")
 
     print("✓ Technical OSINT fallback dossiers generated cleanly.")
 

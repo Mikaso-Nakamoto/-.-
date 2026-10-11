@@ -480,7 +480,7 @@ class OSINTToolkit:
     # 5. Разведка по номеру телефона (Phone OSINT / MNP / phonenumbers)
     # =========================================================================
     async def investigate_phone(self, phone: str) -> Dict[str, Any]:
-        """Разведка по номеру телефона: MNP-перенос, оператор, регион, маски поиска и мессенджеры"""
+        """Разведка по номеру телефона: определение ведомств 8-800, MNP-перенос, оператор, регион"""
         clean_phone = re.sub(r'[^\d+]', '', phone.strip())
         if not clean_phone.startswith("+"):
             if clean_phone.startswith("8") and len(clean_phone) == 11:
@@ -493,22 +493,161 @@ class OSINTToolkit:
         if digits.startswith("7") and len(digits) == 11:
             formatted_ru = f"+7 ({digits[1:4]}) {digits[4:7]}-{digits[7:9]}-{digits[9:11]}"
 
+        # Реестр официальных федеральных горячих линий 8-800 РФ
+        FEDERAL_HOTLINES = {
+            "78002002316": {
+                "org": "Администрация Президента Российской Федерации (Приёмная Президента РФ)",
+                "site": "http://www.kremlin.ru",
+                "desc": "Официальная бесплатная круглосуточная горячая линия для обращений граждан к Президенту России (Москва, ул. Ильинка, 23)"
+            },
+            "78002000112": {
+                "org": "Министерство обороны Российской Федерации (МО РФ)",
+                "site": "https://mil.ru",
+                "desc": "Единая горячая линия Министерства обороны РФ по вопросам СВО и воинской службы"
+            },
+            "78002242222": {
+                "org": "Федеральная служба безопасности Российской Федерации (ФСБ России)",
+                "site": "http://www.fsb.ru",
+                "desc": "Справочный телефон и телефон доверия ФСБ России"
+            },
+            "78002227447": {
+                "org": "Министерство внутренних дел Российской Федерации (МВД России)",
+                "site": "https://mvd.ru",
+                "desc": "Горячая линия МВД России для обращений граждан"
+            },
+            "78001007010": {
+                "org": "Портал Государственных услуг (Госуслуги / Минцифры РФ)",
+                "site": "https://www.gosuslugi.ru",
+                "desc": "Единый контактный центр взаимодействия с гражданами по госуслугам"
+            },
+            "78005555550": {
+                "org": "ПАО Сбербанк (Сбер)",
+                "site": "https://sberbank.ru",
+                "desc": "Единая бесплатная справочная служба для физических лиц"
+            },
+            "78005557778": {
+                "org": "Т-Банк (Тинькофф)",
+                "site": "https://tbank.ru",
+                "desc": "Бесплатная круглосуточная служба клиентской поддержки Т-Банка"
+            },
+            "78001002424": {
+                "org": "Банк ВТБ (ПАО)",
+                "site": "https://vtb.ru",
+                "desc": "Единая информационная служба банка ВТБ"
+            },
+            "78002000000": {
+                "org": "Альфа-Банк (АО «Альфа-Банк»)",
+                "site": "https://alfabank.ru",
+                "desc": "Горячая линия Альфа-Банка для физических лиц"
+            },
+            "78002500890": {
+                "org": "ПАО МТС (Мобильные ТелеСистемы)",
+                "site": "https://mts.ru",
+                "desc": "Бесплатная справочно-информационная служба абонентов МТС"
+            },
+            "78007000611": {
+                "org": "Билайн (ПАО «ВымпелКом»)",
+                "site": "https://beeline.ru",
+                "desc": "Центр поддержки клиентов Билайн"
+            },
+            "78005500555": {
+                "org": "ПАО МегаФон",
+                "site": "https://megafon.ru",
+                "desc": "Единая абонентская служба сети МегаФон"
+            },
+            "78007071212": {
+                "org": "ПАО Ростелеком",
+                "site": "https://rt.ru",
+                "desc": "Единая служба поддержки клиентов Ростелеком"
+            },
+            "78002000122": {
+                "org": "Единая справочная служба «122» / Здравоохранение РФ",
+                "site": "https://minzdrav.gov.ru",
+                "desc": "Единая справочная служба по вопросам здравоохранения и медицинской помощи"
+            },
+            "78002003411": {
+                "org": "Социальный фонд России (СФР / экс-ПФР)",
+                "site": "https://sfr.gov.ru",
+                "desc": "Единый контакт-центр взаимодействия с гражданами по пенсиям и пособиям"
+            },
+            "78002222222": {
+                "org": "Федеральная налоговая служба (ФНС России)",
+                "site": "https://nalog.gov.ru",
+                "desc": "Единый контакт-центр ФНС России"
+            }
+        }
+
         data: Dict[str, Any] = {
             "entity": clean_phone,
             "formatted": formatted_ru,
             "type": "phone",
+            "category": "mobile",
+            "category_ru": "Мобильный номер",
+            "is_mobile": True,
             "country": None,
             "region": None,
             "carrier": None,
             "original_carrier": None,
             "mnp_ported": False,
+            "verified_organization": None,
+            "official_website": None,
+            "description": None,
             "valid": True,
             "search_dorks": [
                 f'"{formatted_ru}" OR "{digits}" OR "8{digits[1:]}"',
                 f'"{formatted_ru}" site:avito.ru OR site:auto.ru',
                 f'"{formatted_ru}" site:hh.ru OR site:vk.com'
             ],
-            "search_links": [
+            "search_links": []
+        }
+
+        # 1. Определение типа номера (Toll-Free 8-800, Mobile, Fixed-line) через phonenumbers
+        try:
+            import phonenumbers
+            from phonenumbers import geocoder, carrier, PhoneNumberType
+            parsed = phonenumbers.parse(clean_phone, None)
+            data["valid"] = phonenumbers.is_valid_number(parsed)
+            ntype = phonenumbers.number_type(parsed)
+            if ntype == PhoneNumberType.TOLL_FREE or digits.startswith("7800") or clean_phone.startswith("+7800"):
+                data["category"] = "toll_free"
+                data["category_ru"] = "Федеральная бесплатная горячая линия (Toll-Free 8-800)"
+                data["is_mobile"] = False
+                data["carrier"] = "Федеральная телефонная сеть (8-800 / ИСС)"
+                data["region"] = "Российская Федерация (общенациональный бесплатный вызов)"
+                data["country"] = "Россия"
+            elif ntype == PhoneNumberType.MOBILE:
+                data["category"] = "mobile"
+                data["category_ru"] = "Мобильный сотовый телефон"
+                data["is_mobile"] = True
+            elif ntype in (PhoneNumberType.FIXED_LINE, PhoneNumberType.FIXED_LINE_OR_MOBILE):
+                data["category"] = "fixed_line"
+                data["category_ru"] = "Городской стационарный телефон"
+                data["is_mobile"] = False
+
+            if not data["country"]:
+                data["country"] = geocoder.description_for_number(parsed, "ru") or geocoder.description_for_number(parsed, "en")
+            def_carrier = carrier.name_for_number(parsed, "ru") or carrier.name_for_number(parsed, "en")
+            if def_carrier and not data["carrier"]:
+                data["carrier"] = def_carrier
+            data["original_carrier"] = def_carrier
+        except Exception:
+            pass
+
+        # 2. Проверка по реестру государственных и банковских горячих линий 8-800
+        if digits in FEDERAL_HOTLINES:
+            hotline_info = FEDERAL_HOTLINES[digits]
+            data["verified_organization"] = hotline_info["org"]
+            data["official_website"] = hotline_info["site"]
+            data["description"] = hotline_info["desc"]
+            data["category"] = "toll_free"
+            data["category_ru"] = "Федеральная государственная/корпоративная горячая линия"
+            data["is_mobile"] = False
+            data["carrier"] = "Единая федеральная линия 8-800"
+            data["region"] = "Российская Федерация (бесплатный вызов по РФ)"
+
+        # 3. Формирование релевантных ссылок для проверки (ИСКЛЮЧАЯ Telegram/WhatsApp для 8-800!)
+        if data["is_mobile"]:
+            data["search_links"] = [
                 {"name": "Telegram контакт", "url": f"https://t.me/+{digits}"},
                 {"name": "WhatsApp чат", "url": f"https://wa.me/{digits}"},
                 {"name": "GetContact (теги записных книжек)", "url": "https://web.getcontact.com"},
@@ -517,25 +656,18 @@ class OSINTToolkit:
                 {"name": "Поиск в Яндексе", "url": f"https://yandex.ru/search/?text=%22{urllib.parse.quote(formatted_ru)}%22"},
                 {"name": "Поиск в Google", "url": f"https://www.google.com/search?q=%22{urllib.parse.quote(formatted_ru)}%22"}
             ]
-        }
+        else:
+            data["search_links"] = [
+                {"name": "Поиск в Яндексе", "url": f"https://yandex.ru/search/?text=%22{urllib.parse.quote(formatted_ru)}%22"},
+                {"name": "Поиск в Google", "url": f"https://www.google.com/search?q=%22{urllib.parse.quote(formatted_ru)}%22"},
+                {"name": "Справочник организаций", "url": f"https://yandex.ru/maps/?text={urllib.parse.quote(formatted_ru)}"}
+            ]
+            if data.get("official_website"):
+                data["search_links"].insert(0, {"name": "Официальный сайт ведомства", "url": data["official_website"]})
 
-        # 1. Статический DEF-справочник Россвязи через phonenumbers
-        try:
-            import phonenumbers
-            from phonenumbers import geocoder, carrier
-            parsed = phonenumbers.parse(clean_phone, None)
-            data["valid"] = phonenumbers.is_valid_number(parsed)
-            data["country"] = geocoder.description_for_number(parsed, "ru") or geocoder.description_for_number(parsed, "en")
-            def_carrier = carrier.name_for_number(parsed, "ru") or carrier.name_for_number(parsed, "en")
-            data["carrier"] = def_carrier
-            data["original_carrier"] = def_carrier
-        except Exception:
-            pass
-
-        # 2. Динамическая проверка MNP (Mobile Number Portability — перенос номера)
-        if digits.startswith("7") and len(digits) == 11:
+        # 4. Динамическая проверка MNP (только для мобильных номеров РФ)
+        if data["is_mobile"] and digits.startswith("7") and len(digits) == 11:
             async with httpx.AsyncClient(timeout=4.0) as client:
-                # Попытка 1: Официальный шлюз детекции оператора Т-Банк / ЦНИИС
                 try:
                     mnp_url = f"https://api.tinkoff.ru/v1/operator_detection?phone=%2B{digits}"
                     resp = await client.get(mnp_url, headers={"User-Agent": "Mozilla/5.0"})
@@ -555,7 +687,6 @@ class OSINTToolkit:
                 except Exception:
                     pass
 
-                # Попытка 2: Резервный шлюз voxlink если первая попытка недоступна
                 if not data.get("mnp_checked"):
                     try:
                         vox_url = f"https://num.voxlink.ru/get/?num={digits}"
@@ -575,6 +706,24 @@ class OSINTToolkit:
                                 data["region"] = reg
                     except Exception:
                         pass
+
+        # 5. Веб-разведка организации (если организация еще не определена)
+        if not data.get("verified_organization"):
+            try:
+                async with httpx.AsyncClient(timeout=3.5, headers={"User-Agent": "Mozilla/5.0"}) as client:
+                    ddg_url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(formatted_ru)}"
+                    ddg_resp = await client.get(ddg_url)
+                    if ddg_resp.status_code == 200:
+                        matches = re.findall(r'<a class="result__url"[^>]*>([^<]+)</a>.*?<a class="result__snippet"[^>]*>(.*?)</a>', ddg_resp.text, re.DOTALL)
+                        if matches:
+                            snippets = []
+                            for u, s in matches[:2]:
+                                clean_s = re.sub(r'<[^>]+>', '', s).strip()
+                                snippets.append(clean_s)
+                            if snippets:
+                                data["web_findings"] = snippets
+            except Exception:
+                pass
 
         return data
 
@@ -789,30 +938,55 @@ class OSINTToolkit:
             return self._build_fallback_report(target, raw_data)
 
         if etype == "phone":
-            system_prompt = (
-                "ТЫ — АНАЛИТИК ТЕЛЕКОМ-РАЗВЕДКИ И ЦИФРОВОГО СЛЕДА («АГЕНТ СНОУДЕН», 2026 год).\n"
-                "ОБЪЕКТ АНАЛИЗА: НОМЕР ТЕЛЕФОНА (физическое лицо / абонент сотовой сети).\n\n"
-                "СТРОЖАЙШИЙ ЗАПРЕТ:\n"
-                "- КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО писать про IP-адреса, открытые порты, серверные службы или Shodan!\n"
-                "- Номер телефона — это персональный идентификатор человека в мобильной сети, а не сервер и не веб-сайт.\n\n"
-                "СТРУКТУРА ОТВЕТА (СТРОГО TELEGRAM HTML, НИКАКОГО MARKDOWN):\n"
-                "1. 📱 <b>Анализ сотового оператора и региона:</b>\n"
-                "   - Реальный текущий оператор (с учетом MNP-переноса номера) и исходный диапазон Россвязи.\n"
-                "   - Домашний регион регистрации SIM-карты.\n"
-                "2. 🔍 <b>Цифровой след и мессенджеры:</b>\n"
-                "   - Доступность в Telegram и WhatsApp.\n"
-                "   - Как работают базы телефонных книг (GetContact, Truecaller, Sync.me) для установления имени владельца.\n"
-                "   - Поисковые маски для поиска объявлений (Авито, резюме, доски объявлений).\n"
-                "3. 🛡 <b>Риски утечек и векторов социальной инженерии:</b>\n"
-                "   - Угрозы со стороны сливов баз доставки/маркетплейсов (СДЭК, Яндекс.Еда) и банковского СБП-сканирования.\n"
-                "4. 📌 <b>Рекомендации по защите приватности:</b>\n"
-                "   - Скрытие номера в настройках Telegram («Кто видит мой номер: Никто»).\n"
-                "   - Защита от спам-звонков, банковских мошенников и социальной инженерии.\n\n"
-                "ПРАВИЛА ОФОРМЛЕНИЯ:\n"
-                "- Используй ТОЛЬКО Telegram HTML (<b>, <i>, <code>, <a href=\"...\">).\n"
-                "- Никогда не пиши сырой Markdown вроде [ссылка](url).\n"
-                "- Ссылки оформляй аккуратно через HTML: <a href=\"...\">Название</a>."
-            )
+            is_toll_free = raw_data.get("category") == "toll_free" or not raw_data.get("is_mobile", True)
+            if is_toll_free:
+                system_prompt = (
+                    "ТЫ — АНАЛИТИК ТЕЛЕКОМ-РАЗВЕДКИ И РЕЕСТРОВ ОРГАНИЗАЦИЙ («АГЕНТ СНОУДЕН», 2026 год).\n"
+                    "ОБЪЕКТ АНАЛИЗА: ФЕДЕРАЛЬНЫЙ БЕСПЛАТНЫЙ НОМЕР ГОРЯЧЕЙ ЛИНИИ (Toll-Free 8-800 / Государственное ведомство / Компания).\n\n"
+                    "СТРОЖАЙШИЙ ЗАПРЕТ:\n"
+                    "- КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО заявлять, что номер 'активно используется в Telegram и WhatsApp'! "
+                    "Номера 8-800 НЕ ЯВЛЯЮТСЯ мобильными сотовыми телефонами физических лиц, они не получают SMS и НЕ МОГУТ иметь аккаунтов в Telegram или WhatsApp!\n"
+                    "- КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО упоминать IP-адреса, открытые порты, серверные службы или Shodan!\n\n"
+                    "СТРУКТУРА ОТВЕТА (СТРОГО TELEGRAM HTML, НИКАКОГО MARKDOWN):\n"
+                    "1. 🏛 <b>Официальный статус и ведомство / организация:</b>\n"
+                    "   - Точное название организации (например: Администрация Президента РФ, банк, министерство).\n"
+                    "   - Назначение горячей линии (приёмная, горячая линия, клиентская служба, бесплатный вызов по РФ).\n"
+                    "   - Официальный сайт ведомства/компании.\n"
+                    "2. 📞 <b>Телеком-инфраструктура:</b>\n"
+                    "   - Статус: Федеральный номер бесплатного вызова (8-800 / ИСС).\n"
+                    "   - Зона действия: вся территория Российской Федерации.\n"
+                    "3. 🛡 <b>Оценка безопасности и рисков подмены (Caller ID Spoofing):</b>\n"
+                    "   - Риск подмены номера телефонными мошенниками (спуфинг официальных номеров банков и госорганов).\n"
+                    "   - Предупреждение: государственные ведомства никогда не требуют пароли, коды или переводы денег по телефону.\n\n"
+                    "ПРАВИЛА ОФОРМЛЕНИЯ:\n"
+                    "- Используй ТОЛЬКО Telegram HTML (<b>, <i>, <code>, <a href=\"...\">).\n"
+                    "- Никакого сырого Markdown!"
+                )
+            else:
+                system_prompt = (
+                    "ТЫ — АНАЛИТИК ТЕЛЕКОМ-РАЗВЕДКИ И ЦИФРОВОГО СЛЕДА («АГЕНТ СНОУДЕН», 2026 год).\n"
+                    "ОБЪЕКТ АНАЛИЗА: МОБИЛЬНЫЙ СОТОВЫЙ НОМЕР ТЕЛЕФОНА (физическое лицо / абонент сотовой сети).\n\n"
+                    "СТРОЖАЙШИЙ ЗАПРЕТ:\n"
+                    "- КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО писать про IP-адреса, открытые порты, серверные службы или Shodan!\n"
+                    "- КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО заявлять, что номер 'активно используется в Telegram и WhatsApp', если таких фактов нет! Ссылки предоставлены исключительно для ручной проверки исследователем.\n\n"
+                    "СТРУКТУРА ОТВЕТА (СТРОГО TELEGRAM HTML, НИКАКОГО MARKDOWN):\n"
+                    "1. 📱 <b>Анализ сотового оператора и региона:</b>\n"
+                    "   - Реальный текущий оператор (с учетом MNP-переноса номера) и исходный диапазон Россвязи.\n"
+                    "   - Домашний регион регистрации SIM-карты.\n"
+                    "2. 🔍 <b>Цифровой след и мессенджеры:</b>\n"
+                    "   - Ссылки для ручной проверки доступности в Telegram и WhatsApp.\n"
+                    "   - Как работают базы телефонных книг (GetContact, Truecaller, Sync.me) для установления имени владельца.\n"
+                    "   - Поисковые маски для поиска объявлений (Авито, резюме, доски объявлений).\n"
+                    "3. 🛡 <b>Риски утечек и векторов социальной инженерии:</b>\n"
+                    "   - Угрозы со стороны сливов баз доставки/маркетплейсов (СДЭК, Яндекс.Еда) и банковского СБП-сканирования.\n"
+                    "4. 📌 <b>Рекомендации по защите приватности:</b>\n"
+                    "   - Скрытие номера в настройках Telegram («Кто видит мой номер: Никто»).\n"
+                    "   - Защита от спам-звонков, банковских мошенников и социальной инженерии.\n\n"
+                    "ПРАВИЛА ОФОРМЛЕНИЯ:\n"
+                    "- Используй ТОЛЬКО Telegram HTML (<b>, <i>, <code>, <a href=\"...\">).\n"
+                    "- Никогда не пиши сырой Markdown вроде [ссылка](url).\n"
+                    "- Ссылки оформляй аккуратно через HTML: <a href=\"...\">Название</a>."
+                )
         elif etype in ("username", "email"):
             system_prompt = (
                 f"ТЫ — СПЕЦИАЛИСТ OSINT ПО ЦИФРОВОМУ СЛЕДУ И ПРОФИЛИРОВАНИЮ ({etype.upper()}).\n"
@@ -938,22 +1112,33 @@ class OSINTToolkit:
         elif t == "phone":
             formatted = data.get("formatted") or target
             lines.append(f"📱 <b>Разведка телефонного номера:</b> <code>{html.escape(formatted)}</code>\n")
-            if data.get("carrier"):
-                lines.append(f"• Оператор связи: <b>{data.get('carrier')}</b>")
-            if data.get("region"):
-                lines.append(f"• Домашний регион: <b>{data.get('region')}</b>")
-            elif data.get("country"):
-                lines.append(f"• Страна / Регион: <b>{data.get('country')}</b>")
+            if data.get("verified_organization"):
+                lines.append(f"🏛 <b>Организация:</b> <b>{html.escape(data['verified_organization'])}</b>")
+                if data.get("description"):
+                    lines.append(f"• Назначение: <i>{html.escape(data['description'])}</i>")
+                if data.get("official_website"):
+                    lines.append(f"• Официальный сайт: <a href=\"{data['official_website']}\">{data['official_website']}</a>")
+                lines.append(f"• Категория: <b>{data.get('category_ru', 'Федеральная горячая линия')}</b>")
+            else:
+                if data.get("carrier"):
+                    lines.append(f"• Оператор связи: <b>{data.get('carrier')}</b>")
+                if data.get("region"):
+                    lines.append(f"• Домашний регион: <b>{data.get('region')}</b>")
+                elif data.get("country"):
+                    lines.append(f"• Страна / Регион: <b>{data.get('country')}</b>")
+                if data.get("category_ru"):
+                    lines.append(f"• Тип номера: <i>{data.get('category_ru')}</i>")
 
             dorks = data.get("search_dorks", [])
             if dorks:
-                lines.append("\n🔎 <b>Поисковые маски для объявлений (Avito / резюме):</b>")
+                lines.append("\n🔎 <b>Поисковые маски для поиска в сети:</b>")
                 for d in dorks[:2]:
                     lines.append(f"• <code>{html.escape(d)}</code>")
 
             links = data.get("search_links", [])
             if links:
-                lines.append("\n🔗 <b>Мессенджеры и проверка записных книжек:</b>")
+                hdr = "🔗 <b>Проверка в мессенджерах и базах:</b>" if data.get("is_mobile") else "🔗 <b>Справочники и официальные порталы:</b>"
+                lines.append(f"\n{hdr}")
                 for it in links:
                     if isinstance(it, dict):
                         lines.append(f"• <a href=\"{it['url']}\">{it['name']}</a>")
