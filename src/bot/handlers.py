@@ -25,23 +25,15 @@ from aiogram.types import (
 from aiogram.exceptions import TelegramBadRequest
 
 BOT_COMMANDS = [
-    BotCommand(command="start", description="🏠 Главное меню и статус"),
-    BotCommand(command="chat", description="💬 Войти в диалог с ИИ"),
-    BotCommand(command="exit", description="🚪 Выйти из диалога в меню"),
-    BotCommand(command="digest", description="⚡️ Сформировать утренний дайджест"),
-    BotCommand(command="search", description="🔍 Основательный поиск (Каналы + Web + Darknet)"),
-    BotCommand(command="google", description="🌐 Вкл/выкл Google AI Search (Grounding)"),
-    BotCommand(command="darknet", description="🧅 Вкл/выкл поиск в Darknet (.onion)"),
-    BotCommand(command="status", description="📊 Статус узлов и моделей"),
-    BotCommand(command="sources", description="📋 Управление каналами и RSS"),
-    BotCommand(command="add_channel", description="➕ Добавить Telegram-канал"),
-    BotCommand(command="add_rss", description="➕ Добавить RSS-ленту"),
-    BotCommand(command="del_source", description="🗑 Удалить источник"),
-    BotCommand(command="refresh", description="🔄 Собрать свежие новости сейчас"),
-    BotCommand(command="find", description="🔎 Найти пост в архиве каналов"),
-    BotCommand(command="test_mode", description="🧪 Переключить тестовый режим"),
-    BotCommand(command="clearnews", description="🧹 Очистить базу новостей и дайджестов"),
-    BotCommand(command="help", description="ℹ️ Инструкция и справка по командам"),
+    BotCommand(command="start", description="🏠 Главное меню"),
+    BotCommand(command="digest", description="⚡️ Сводка по источникам"),
+    BotCommand(command="map", description="🗺 Карта СВО (Military Summary)"),
+    BotCommand(command="search", description="🔍 Сетевой поиск & Tor (.onion)"),
+    BotCommand(command="find", description="🔎 Найти пост в каналах"),
+    BotCommand(command="refresh", description="🔄 Обновить ленту новостей"),
+    BotCommand(command="sources", description="📡 Управление источниками"),
+    BotCommand(command="status", description="📊 Статус системы и моделей"),
+    BotCommand(command="help", description="ℹ️ Справка по командам"),
 ]
 
 async def register_bot_commands(bot):
@@ -357,15 +349,15 @@ def build_snowden_menu_text(
 ) -> str:
     return (
         "🕶 <b>Аналитический агент Сноуден на связи.</b>\n"
-        "<i>Автономный мониторинг каналов, глубокая OSINT-разведка и аналитика с ИИ.</i>\n\n"
-        "💡 <i>Вы можете писать любой вопрос или задачу прямо сюда — я сам определю нужный инструмент (поиск публикаций в каналах, разведка в Сети и Darknet или аналитическая сводка).</i>"
+        "<i>Мониторинг первоисточников, военная аналитика СВО и полезный софт с ИИ.</i>\n\n"
+        "💡 <i>Пишите любой вопрос прямо сюда — я проанализирую ваши добавленные каналы, найду нужные публикации или проведу поиск в сети и Tor.</i>"
     )
 
     # --------------------------------------------------------------------------
-    # Главное меню (Команда /start или кнопка "Главное меню", а также слова "старт", "меню")
+    # Главное меню (Команда /start, /старт, /menu или кнопка "Главное меню")
     # --------------------------------------------------------------------------
     @r.message(Command("start", "menu"))
-    @r.message(F.text.lower().in_(["старт", "start", "меню", "menu", "привет", "главное меню", "/start", "/menu"]))
+    @r.message(F.text.func(lambda t: bool(t and re.match(r'^(?:/start|/старт|/menu|/меню|старт|start|меню|menu|привет|главное меню)(?:\s|$)', t.strip(), re.IGNORECASE))))
     async def cmd_start_msg(msg: Message, state: FSMContext):
         logger.info(f"📩 Команда СТАРТ/МЕНЮ от пользователя ID={msg.from_user.id} (@{msg.from_user.username})")
         if not is_admin(msg.from_user.id):
@@ -380,69 +372,34 @@ def build_snowden_menu_text(
             )
             return
 
-        await register_bot_commands(msg.bot)
-        await state.clear()
-        is_local_on = await llm_router.check_local_health()
-        local_status = "🟢 В сети (LM Studio)" if is_local_on else "🔴 Офлайн"
-
-        active_prov = llm_router.active_provider
-        current_model = llm_router.get_current_model_for_provider(active_prov if active_prov != "auto" else "openrouter")
-        chat_active = storage.is_chat_mode_active()
-        is_test_mode = storage.is_test_mode()
-        tz_name = scheduler.timezone_name if scheduler else "Europe/Moscow"
-        next_run = scheduler.get_next_run_time() if scheduler else "08:50"
-
-        tg_count = len(get_telegram_channels())
-        rss_count = len(get_rss_feeds())
-
-        text = build_snowden_menu_text(
-            local_status=local_status,
-            active_prov=active_prov,
-            current_model=current_model,
-            chat_active=chat_active,
-            is_test_mode=is_test_mode,
-            tz_name=tz_name,
-            next_run=next_run,
-            tg_count=tg_count,
-            rss_count=rss_count,
-            darknet_on=storage.is_darknet_search_enabled()
-        )
-        await send_safe_reply(msg, text, reply_markup=get_main_menu_keyboard(chat_active, get_web_app_url()))
+        try:
+            await state.clear()
+            chat_active = storage.is_chat_mode_active()
+            text = build_snowden_menu_text()
+            await send_safe_reply(msg, text, reply_markup=get_main_menu_keyboard(chat_active, get_web_app_url()))
+        except Exception as e:
+            logger.error(f"Ошибка в cmd_start_msg: {e}")
+            await msg.answer("🕶 <b>Аналитический агент Сноуден на связи.</b>", parse_mode="HTML", reply_markup=get_main_menu_keyboard(True, get_web_app_url()))
 
     @r.message(Command("help"))
-    @r.message(F.text.lower().in_(["/help", "помощь", "справка", "инструкция"]))
+    @r.message(F.text.func(lambda t: bool(t and re.match(r'^(?:/help|/справка|/помощь|помощь|справка|инструкция)(?:\s|$)', t.strip(), re.IGNORECASE))))
     async def cmd_help_msg(msg: Message):
         if not is_admin(msg.from_user.id):
             return
-        await register_bot_commands(msg.bot)
         help_text = (
             "📖 <b>Справочник команд терминала «Агент Сноуден»:</b>\n\n"
-            "🔍 <b>Основательный поиск, Google AI и Darknet:</b>\n"
-            "• <code>/search &lt;запрос&gt;</code> (или <code>/поиск</code>) — глубокий сбор и аналитический отчет ИИ:\n"
-            "  1. Ваши собственные каналы и RSS (с цитатами и ссылками).\n"
-            "  2. Внешние авторитетные мировые и профильные медиа (Web / Google AI Grounding).\n"
-            "  3. Теневой сегмент (.onion / Darknet) — если включен.\n"
-            "• <code>/google</code> (или <code>/google on|off</code>) — включить/выключить живой Google AI Search (Gemini Grounding).\n"
-            "• <code>/darknet</code> (или <code>/darknet on|off</code>) — включить/выключить поиск в сети Tor (.onion).\n"
-            "• <code>/find &lt;запрос&gt;</code> — быстрый поиск конкретного поста в архиве каналов.\n\n"
-            "💬 <b>Диалог и оперативная разведка:</b>\n"
-            "• <code>/chat</code> — войти в режим прямого диалога со Сноуденом.\n"
-            "• <code>/exit</code> — завершить диалог и вернуться к терминалу.\n"
-            "• В режиме чата Сноуден опрашивает все каналы (@medvedev_telegram, @ross_name, @Dyadyabatya0, @Voennaja_svodka, @infomil_live, РИА, ТАСС), объединяет факты без дублирования в единый насыщенный абзац, цитирует первоисточники через <b>цитаты</b> и отправляет <b>реальные фото/медиа альбомы</b> с места событий!\n\n"
-            "🗺 <b>Интерактивная карта СВО (Military Summary):</b>\n"
-            "• <code>/map</code> (или <code>/frontline</code>) — оперативная обстановка по секторам ЛБС и интерактивная карта militarysummary.com\n\n"
-            "⚡️ <b>Сводки и аналитика:</b>\n"
-            "• <code>/digest</code> — немедленно сгенерировать утреннюю аналитическую сводку (СВО, геополитика, полезный софт, безопасность).\n"
-            "• <code>/refresh</code> — запустить оперативный опрос всех каналов и обновить базу публикаций прямо сейчас.\n\n"
-            "⚙️ <b>Управление источниками и ядром:</b>\n"
-            "• <code>/sources</code> — список подключенных каналов и RSS.\n"
-            "• <code>/add_channel</code> — добавить Telegram-канал (поддерживаются @юзернейм, ссылки t.me и инвайты t.me/+...).\n"
-            "• <code>/add_rss</code> — добавить RSS-ленту.\n"
-            "• <code>/del_source</code> — удалить ненужный канал или ленту.\n"
-            "• <code>/status</code> — статус оборудования и ядра ИИ.\n"
-            "• <code>/test_mode</code> — переключить тестовый режим (вкл/выкл запись в БД).\n"
-            "• <code>/clearnews</code> — полностью очистить базу новостей и тестовых дайджестов.\n\n"
-            "<i>💡 Для вызова списка команд в любой момент нажимайте кнопку <b>«Меню» ( [/] )</b> в левом нижнем углу чата.</i>"
+            "⚡️ <b>Сводки и мониторинг:</b>\n"
+            "• <code>/digest</code> — сформировать аналитический дайджест по вашим источникам\n"
+            "• <code>/map</code> (или <code>/frontline</code>) — оперативная обстановка по секторам ЛБС и интерактивная карта militarysummary.com\n"
+            "• <code>/refresh</code> — запустить оперативный опрос всех каналов и обновить базу\n\n"
+            "🔍 <b>Поиск и разведка:</b>\n"
+            "• <code>/find &lt;текст&gt;</code> — быстрый поиск конкретных постов в архиве каналов\n"
+            "• <code>/search &lt;запрос&gt;</code> — глубокий сетевой поиск через облачные модели и сеть Tor (.onion)\n\n"
+            "⚙️ <b>Управление системой:</b>\n"
+            "• <code>/sources</code> — список подключенных каналов и RSS\n"
+            "• <code>/status</code> — статус оборудования и моделей ИИ\n"
+            "• <code>/start</code> — главное интерактивное меню\n\n"
+            "💬 <i>Вы можете в любой момент написать любой вопрос в чат — ИИ проанализирует контекст ваших каналов и выдаст развернутый ответ!</i>"
         )
         await send_safe_reply(msg, help_text, reply_markup=get_main_menu_keyboard(storage.is_chat_mode_active(), get_web_app_url()))
 
@@ -450,30 +407,8 @@ def build_snowden_menu_text(
     async def cb_main_menu(call: CallbackQuery, state: FSMContext):
         await call.answer()
         await state.clear()
-        is_local_on = await llm_router.check_local_health()
-        local_status = "🟢 В сети (LM Studio)" if is_local_on else "🔴 Офлайн"
-        active_prov = llm_router.active_provider
-        current_model = llm_router.get_current_model_for_provider(active_prov if active_prov != "auto" else "openrouter")
         chat_active = storage.is_chat_mode_active()
-        is_test_mode = storage.is_test_mode()
-        tz_name = scheduler.timezone_name if scheduler else "Europe/Moscow"
-        next_run = scheduler.get_next_run_time() if scheduler else "08:50"
-
-        tg_count = len(get_telegram_channels())
-        rss_count = len(get_rss_feeds())
-
-        text = build_snowden_menu_text(
-            local_status=local_status,
-            active_prov=active_prov,
-            current_model=current_model,
-            chat_active=chat_active,
-            is_test_mode=is_test_mode,
-            tz_name=tz_name,
-            next_run=next_run,
-            tg_count=tg_count,
-            rss_count=rss_count,
-            darknet_on=storage.is_darknet_search_enabled()
-        )
+        text = build_snowden_menu_text()
         await safe_edit_text(call, text, get_main_menu_keyboard(chat_active, get_web_app_url()))
 
     # --------------------------------------------------------------------------
