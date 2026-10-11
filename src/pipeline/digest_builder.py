@@ -45,20 +45,22 @@ class DigestBuilder:
                 return True
         return False
 
-    def _stratified_balance_items(self, items: List[Dict[str, Any]], target_count: int = 32) -> List[Dict[str, Any]]:
+    def _stratified_balance_items(self, items: List[Dict[str, Any]], target_count: int = 24) -> List[Dict[str, Any]]:
         """
         Стратифицированная балансировка выборки новостей по ключевым доменам:
-        - Военно-политическая хроника & СВО (Дядя Батя, Росснейм, Рыбарь)
+        - Военно-политическая хроника & СВО (Дядя Батя, Росснейм, Рыбарь, Военная сводка, Инфомил)
         - Регионы Юга & инциденты (Ростов Царьград)
         - Кибербезопасность & Право (Киберполиция России, Хакер)
         - Полезный софт & OpenSource (IT_Shelter, GitHub Radar, OpenNet)
         - Мировая политика & Аналитика (РИА, ТАСС, Коммерсантъ, РБК)
         - Технологии, Hardware & ИИ (AI, 3DNews, Rozetked)
+
+        Строго ограничивает общий размер выборки величиной target_count во избежание
+        переполнения контекстного окна (context overflow) локальной модели.
         """
         if not items:
             return []
 
-        # Гарантированно сохраняем свежие публикации ключевых первоисточников
         key_channel_names = {
             "ross_name", "dyadyabatya0", "rybar", "rostov_tsargrad",
             "voennaja_svodka", "infomil_live",
@@ -67,17 +69,23 @@ class DigestBuilder:
 
         balanced: List[Dict[str, Any]] = []
         seen_urls = set()
+        channel_counts: Dict[str, int] = {}
 
+        # 1. Приоритетный отбор: берем до 1-2 самых свежих материалов от каждого ключевого канала
+        # Ограничиваем квоту ключевых каналов, чтобы оставить место другим темам
+        max_key_items = max(4, target_count // 2)
         for it in items:
+            if len(balanced) >= max_key_items:
+                break
             ch = (it.get("channel") or "").lower().lstrip("@")
             u = it.get("url") or ""
             if any(k in ch for k in key_channel_names):
-                if u not in seen_urls:
+                if u not in seen_urls and channel_counts.get(ch, 0) < 2:
                     balanced.append(it)
-                    if u:
-                        seen_urls.add(u)
+                    seen_urls.add(u)
+                    channel_counts[ch] = channel_counts.get(ch, 0) + 1
 
-        # Категоризируем оставшиеся материалы
+        # 2. Категоризируем оставшиеся материалы
         categorized: Dict[str, List[Dict[str, Any]]] = {}
         for it in items:
             u = it.get("url") or ""
@@ -85,9 +93,11 @@ class DigestBuilder:
                 cat = it.get("category", "Общее")
                 categorized.setdefault(cat, []).append(it)
 
-        # Раундовый отбор для равномерного представления всех сфер
+        # 3. Раундовый отбор для равномерного представления всех сфер до target_count
         categories_list = list(categorized.keys())
-        for round_idx in range(5):
+        for round_idx in range(6):
+            if len(balanced) >= target_count:
+                break
             for cat in categories_list:
                 cat_items = categorized[cat]
                 if round_idx < len(cat_items) and len(balanced) < target_count:
@@ -95,30 +105,28 @@ class DigestBuilder:
                     u = it.get("url") or ""
                     if u not in seen_urls:
                         balanced.append(it)
-                        if u:
-                            seen_urls.add(u)
+                        seen_urls.add(u)
 
+        # 4. Добор, если категорий не хватило до target_count
         if len(balanced) < target_count:
             for it in items:
                 u = it.get("url") or ""
                 if u not in seen_urls and len(balanced) < target_count:
                     balanced.append(it)
-                    if u:
-                        seen_urls.add(u)
+                    seen_urls.add(u)
 
-        return balanced
+        return balanced[:target_count]
 
     async def curate_items_with_ai(self, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
-        Отбирает сбалансированный срез публикаций (до 30–35 материалов) со всех каналов,
-        гарантируя присутствие ключевых первоисточников (@ross_name, @Dyadyabatya0,
-        @cyberpolice_rus, @it_shelter, @github_radar, РИА, ТАСС), чтобы ИИ-синтезатор
-        мог провести кросс-сопоставление дублирующихся тем и объединить их в связный дайджест.
+        Отбирает сбалансированный срез публикаций с учетом контекстного бюджета активной модели:
+        - Для локальной Qwen 2.5 (LM Studio, контекст 8k): 14–16 публикаций (~4 500 токенов).
+        - Для облачных шлюзов (Gemini, OpenRouter): до 28–32 публикаций.
         """
-        if len(items) <= 32:
-            return items
+        is_local = (self.router.active_provider == "local")
+        target_count = 15 if is_local else 30
 
-        return self._stratified_balance_items(items, target_count=32)
+        return self._stratified_balance_items(items, target_count=target_count)
 
     async def collect_fresh_news(self) -> List[Dict[str, Any]]:
         sources = load_sources().get("sources", {})
@@ -487,13 +495,16 @@ class DigestBuilder:
         lead_image_url = source_images[0] if source_images else ""
 
         # ЭТАП 2: LLM Синтезатор аналитического дайджеста
-        # Формируем сырой текст для LLM с полной фактурой
+        # Формируем сырой текст для LLM с полной фактурой и с учетом лимита контекста модели
+        is_local = (self.router.active_provider == "local")
+        max_content_len = 650 if is_local else 900
+
         raw_chunks = []
         for i, it in enumerate(curated_items, 1):
             raw_chunks.append(
                 f"[{i}] Источник: {it.get('channel', 'Канал')} ({it.get('category', 'Общее')})\n"
                 f"Заголовок: {it.get('title', 'Новость / Релиз')}\n"
-                f"Текст публикации: {it.get('content', '')[:900]}\n"
+                f"Текст публикации: {(it.get('content', '') or '').strip()[:max_content_len]}\n"
                 f"Ссылка: {it.get('url', '')}\n"
             )
 
