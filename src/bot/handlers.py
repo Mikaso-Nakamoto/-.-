@@ -345,11 +345,7 @@ def build_snowden_menu_text(
     tg_count: int = 0,
     rss_count: int = 0
 ) -> str:
-    return (
-        "🕶 <b>Аналитический агент Сноуден на связи.</b>\n"
-        "<i>Мониторинг первоисточников, военная аналитика СВО и полезный софт с ИИ.</i>\n\n"
-        "💡 <i>Пишите любой вопрос прямо сюда — я проанализирую ваши добавленные каналы, найду нужные публикации или проведу поиск в сети.</i>"
-    )
+    return "🕶 <b>Аналитический агент Сноуден</b>"
 
     # --------------------------------------------------------------------------
     # Главное меню (Команда /start, /старт, /menu или кнопка "Главное меню")
@@ -377,7 +373,7 @@ def build_snowden_menu_text(
             await send_safe_reply(msg, text, reply_markup=get_main_menu_keyboard(chat_active, get_web_app_url()))
         except Exception as e:
             logger.error(f"Ошибка в cmd_start_msg: {e}")
-            await msg.answer("🕶 <b>Аналитический агент Сноуден на связи.</b>", parse_mode="HTML", reply_markup=get_main_menu_keyboard(True, get_web_app_url()))
+            await msg.answer("🕶 <b>Аналитический агент Сноуден</b>", parse_mode="HTML", reply_markup=get_main_menu_keyboard(True, get_web_app_url()))
 
     @r.message(Command("help"))
     @r.message(F.text.func(lambda t: bool(t and re.match(r'^(?:/help|/справка|/помощь|помощь|справка|инструкция)(?:\s|$)', t.strip(), re.IGNORECASE))))
