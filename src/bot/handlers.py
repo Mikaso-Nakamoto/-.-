@@ -48,14 +48,17 @@ async def register_bot_commands(bot):
 
 def extract_stems(text: str) -> List[str]:
     """Извлекает корни слов для семантического поиска по новостям"""
-    words = re.findall(r'[а-яa-z0-9]+', text.lower())
+    words = re.findall(r'[а-яa-z0-9_-]+', text.lower())
     stems = []
-    stop_words = {"что", "как", "где", "когда", "почему", "это", "или", "для", "про", "был", "была", "были", "быть", "все", "всё", "его", "она", "они", "том", "под", "при", "над", "после", "этой"}
+    stop_words = {
+        "что", "как", "где", "когда", "почему", "зачем", "это", "или", "для", "про", "был",
+        "была", "были", "быть", "все", "всё", "его", "она", "они", "том", "под", "при",
+        "над", "после", "этой", "этом", "этих", "какой", "какие", "расскажи", "пожалуйста",
+        "слышно", "известно", "инфа", "инфу", "информацию", "данные", "собери", "подробно",
+        "максимум", "хочу", "дай", "покажи"
+    }
     for w in words:
         if len(w) <= 2 or w in stop_words:
-            continue
-        if w.startswith("ростов"):
-            stems.append("ростов")
             continue
         stem = re.sub(r'(?:овали|евали|ован|еван|али|яли|или|ила|ала|ели|ать|ять|ить|еть|ого|его|ому|ему|ыми|ими|ами|ями|ах|ях|ия|ие|ые|ое|ее|ом|ем|ой|ей|ам|ям|а|я|о|е|у|ю|ы|и)$', '', w)
         stems.append(stem if len(stem) >= 3 else w)
@@ -1241,23 +1244,24 @@ def build_snowden_menu_text(
         q_lower = user_query.lower()
         is_news_inquiry = any(w in q_lower for w in [
             "новост", "украин", "сво", "фронт", "трамп", "войн", "политик",
-            "росс", "дядя батя", "рыбар", "ростов", "царьград", "конкретик", "что произошл", "ситуаци",
-            "атак", "удар", "дрон", "бпла", "взрыв", "прилет", "пожар", "нефт", "мост", "софт"
+            "росс", "дядя батя", "рыбар", "сводк", "ситуаци", "что произошло", "что слышно",
+            "атак", "удар", "дрон", "бпла", "взрыв", "прилет", "пожар", "нефт", "мост", "софт",
+            "программ", "github", "хакер", "безопасн", "подробн", "инфа", "инфу", "детал", "обстановк"
         ])
 
-        # 1. Поиск публикаций по корням слов и семантике в локальной базе
-        found_items = storage.search_news_feed(user_query, limit=40)
+        # 1. Поиск публикаций по семантике и корням в локальной базе (до 60 кандидатов)
+        found_items = storage.search_news_feed(user_query, limit=60)
 
-        # 2. Если результатов мало или вопрос явно о событиях/сводках — оперативно опрашиваем каналы
-        if len(found_items) < 6 or is_news_inquiry:
+        # 2. Если результатов мало или запрос информационный — оперативно опрашиваем каналы
+        if len(found_items) < 10 or is_news_inquiry:
             try:
                 await digest_builder.collect_fresh_news()
-                found_items = storage.search_news_feed(user_query, limit=40)
+                found_items = storage.search_news_feed(user_query, limit=60)
             except Exception as e:
                 logger.warning(f"Оперативный сбор новостей для чата: {e}")
 
-        # Объединяем с общей свежей лентой для полноты картины
-        general_feed = storage.get_news_feed(limit=50)
+        # Объединяем с общей свежей лентой для максимальной полноты картины
+        general_feed = storage.get_news_feed(limit=80)
         seen_hashes = {it.get("item_hash") or it.get("url") for it in found_items}
         candidate_items = list(found_items)
         for it in general_feed:
@@ -1271,24 +1275,28 @@ def build_snowden_menu_text(
 
         def item_score(it):
             score = 0
-            text_corpus = f"{it.get('channel', '')} {it.get('title', '')} {it.get('content', '')} {it.get('category', '')}".lower()
+            title_lower = str(it.get('title', '')).lower()
+            content_lower = str(it.get('content', '')).lower()
+            ch_lower = str(it.get('channel', '')).lower()
 
             # Совпадение по корням слов запроса
+            matched = 0
             for s in q_stems:
-                if s in text_corpus:
-                    score += 30
-
-            # Особый приоритет для событий типа атаки на Ростов / СВО / фронт
-            if "ростов" in q_lower and "ростов" in text_corpus:
-                score += 50
-            if any(w in q_lower for w in ["атак", "удар", "дрон", "взрыв", "прилет", "сво", "фронт"]):
-                if any(k in text_corpus for k in ["атак", "удар", "дрон", "бпла", "нефт", "мост", "пожар", "взрыв", "сводк", "фронт"]):
+                if s in title_lower:
                     score += 40
+                    matched += 1
+                elif s in content_lower:
+                    score += 20
+                    matched += 1
 
-            # Приоритет авторитетных аналитических каналов
-            ch_lower = str(it.get("channel", "")).lower()
-            if any(ch in ch_lower for ch in ["ross_name", "dyadyabatya"]):
-                score += 25
+            if matched > 1:
+                score += matched * 25
+
+            # Приоритет авторитетных аналитических и профильных каналов
+            if any(ch in ch_lower for ch in ["voennaja_svodka", "infomil_live", "ross_name", "dyadyabatya0"]):
+                score += 20
+            elif any(ch in ch_lower for ch in ["it_shelter", "github_radar", "cyberpolice_rus"]):
+                score += 20
             elif any(ch in ch_lower for ch in ["rybar", "tsargrad", "rian", "tass"]):
                 score += 15
 
@@ -1311,18 +1319,24 @@ def build_snowden_menu_text(
             if img0 and img0.startswith("http") and img0 not in relevant_photos:
                 relevant_photos.append(img0)
 
-        # 5. Формирование пакета фактов для LLM
+        # 5. Формирование максимально полного пакета фактов для LLM
         recent_news_str = ""
         if sorted_items:
             news_parts = []
-            for i, it in enumerate(sorted_items[:22], 1):
+            for i, it in enumerate(sorted_items[:28], 1):
                 ch = it.get("channel", "Канал")
                 cat = it.get("category", "Новости")
                 t = it.get("title", "")
-                c = it.get("content", "")[:750]
+                c = (it.get("content", "") or "").strip()[:1800]
                 u = it.get("url", "")
+                pub = it.get("published_at") or it.get("created_at") or ""
                 has_media = "Да" if it.get("image_url") or it.get("media_urls") else "Нет"
-                news_parts.append(f"[{i}] Источник: {ch} ({cat}) | Фото: {has_media}\nЗаголовок: {t}\nТекст публикации: {c}\nСсылка: {u}")
+                news_parts.append(
+                    f"[{i}] Источник: {ch} ({cat}) | Время: {pub} | Медиа: {has_media}\n"
+                    f"Заголовок: {t}\n"
+                    f"Текст публикации: {c}\n"
+                    f"Ссылка: {u}"
+                )
             recent_news_str = "\n---\n".join(news_parts)
 
         try:

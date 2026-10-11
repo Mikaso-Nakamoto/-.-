@@ -231,39 +231,113 @@ class Storage:
                 items.append(d)
             return items
 
-    def search_news_feed(self, query: str, limit: int = 40) -> List[Dict[str, Any]]:
+    def search_news_feed(self, query: str, limit: int = 50, fetch_depth: int = 800) -> List[Dict[str, Any]]:
         """
-        Ищет публикации в базе данных по корням слов и ключевым терминам
+        Ищет публикации в базе данных по корням слов, семантическим категориям и ключевым терминам.
+        Не зависит от жестких хардкодов городов или тем — расширяет контекст по смысловым доменам
+        и собирает максимум фактуры со всех первоисточников.
         """
-        words = re.findall(r'[а-яa-z0-9]+', query.lower())
+        words = re.findall(r'[а-яa-z0-9_-]+', query.lower())
+        stop_words = {
+            "что", "как", "где", "когда", "почему", "зачем", "это", "или", "для", "про", "был",
+            "была", "были", "быть", "все", "всё", "его", "она", "они", "том", "под", "при",
+            "над", "после", "этой", "этом", "этих", "какой", "какие", "расскажи", "пожалуйста",
+            "слышно", "известно", "инфа", "инфу", "информацию", "данные", "собери", "подробно",
+            "максимум", "хочу", "дай", "покажи"
+        }
         stems = []
-        stop_words = {"что", "как", "где", "когда", "почему", "это", "или", "для", "про", "был", "была", "были", "быть", "все", "всё", "его", "она", "они", "том", "под", "при", "над"}
         for w in words:
             if len(w) <= 2 or w in stop_words:
-                continue
-            if w.startswith("ростов"):
-                stems.append("ростов")
                 continue
             stem = re.sub(r'(?:овали|евали|ован|еван|али|яли|или|ила|ала|ели|ать|ять|ить|еть|ого|его|ому|ему|ыми|ими|ами|ями|ах|ях|ия|ие|ые|ое|ее|ом|ем|ой|ей|ам|ям|а|я|о|е|у|ю|ы|и)$', '', w)
             stems.append(stem if len(stem) >= 3 else w)
 
-        all_items = self.get_news_feed(limit=250)
+        all_items = self.get_news_feed(limit=fetch_depth)
         if not stems:
+            # Общий запрос без конкретных ключевых слов — возвращаем самые свежие материалы
             return all_items[:limit]
+
+        # Определение смысловых доменов запроса для релевантного расширения
+        q_full = query.lower()
+        is_military = any(k in q_full for k in [
+            "сво", "фронт", "войн", "бпла", "дрон", "удар", "пво", "атак", "прилет",
+            "наступлен", "снаряд", "миноборон", "всу", "вс рф", "ракета", "обстрел",
+            "курахов", "покровск", "купянск", "часов яр", "донецк", "белгород", "ростов",
+            "запорож", "херсон", "харьков", "крым", "мост", "склад", "нефтебаз"
+        ])
+        is_software = any(k in q_full for k in [
+            "софт", "программ", "github", "утилит", "код", "репозитор", "разработ",
+            "opensource", "open-source", "лицензи", "инструмент", "библиотек",
+            "linux", "windows", "macos", "python", "docker", "ai", "нейросет"
+        ])
+        is_cyber = any(k in q_full for k in [
+            "кибер", "безопасн", "хакер", "уязвим", "взлом", "троян", "вирус",
+            "malware", "утечк", "cve", "мошенник", "атака", "эксплойт", "фишинг"
+        ])
+        is_geopolitics = any(k in q_full for k in [
+            "геополитик", "трамп", "сша", "нато", "ес", "китай", "санкци", "переговор",
+            "путин", "лавров", "кремл", "белый дом", "дипломат", "оон", "брикс"
+        ])
+
+        military_channels = {"voennaja_svodka", "infomil_live", "ross_name", "dyadyabatya0", "rybar", "tsargrad"}
+        software_channels = {"it_shelter", "github_radar", "habr", "opennet"}
+        cyber_channels = {"cyberpolice_rus", "xakep"}
+        geo_channels = {"rian", "tass", "kommersant"}
 
         scored = []
         for it in all_items:
-            corpus = f"{it.get('channel', '')} {it.get('title', '')} {it.get('content', '')} {it.get('category', '')}".lower()
+            title = (it.get("title") or "").lower()
+            content = (it.get("content") or "").lower()
+            ch = str(it.get("channel") or "").lower()
+            cat = str(it.get("category") or "").lower()
+
             score = 0
+            matched_stems_count = 0
+
             for s in stems:
-                if s in corpus:
+                in_title = s in title
+                in_content = s in content
+                if in_title:
+                    score += 45
+                    matched_stems_count += 1
+                elif in_content:
+                    score += 20
+                    matched_stems_count += 1
+
+            # Бонус плотности: если найдено сразу несколько разных ключевых корней из запроса
+            if matched_stems_count > 1:
+                score += matched_stems_count * 20
+
+            # Доменные соответствия
+            if is_military:
+                if any(mc in ch for mc in military_channels):
                     score += 25
-            if any(s in corpus for s in ["атак", "удар", "дрон", "бпла", "взрыв", "прилет", "пожар", "нефт", "мост"]):
-                score += 15
-            if any(ch in str(it.get("channel", "")).lower() for ch in ["ross_name", "dyadyabatya", "rybar", "tsargrad"]):
-                score += 10
+                if any(mc in cat for mc in ["сво", "хроник", "военн"]):
+                    score += 20
+            if is_software:
+                if any(sc in ch for sc in software_channels):
+                    score += 30
+                if any(sc in cat for sc in ["софт", "open-source", "технолог"]):
+                    score += 25
+            if is_cyber:
+                if any(cc in ch for cc in cyber_channels):
+                    score += 30
+                if "кибер" in cat or "безопасн" in cat:
+                    score += 25
+            if is_geopolitics:
+                if any(gc in ch for gc in geo_channels):
+                    score += 20
+                if "геополитик" in cat or "мир" in cat:
+                    score += 15
+
+            # Наличие медиа/фотографий
             if it.get("image_url") or it.get("media_urls"):
                 score += 5
+
+            # Длина и содержательность текста
+            if len(content) > 300:
+                score += 5
+
             if score > 0:
                 scored.append((score, it))
 
