@@ -8,7 +8,7 @@ from datetime import datetime
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from aiogram import Bot
-from aiogram.types import FSInputFile, LinkPreviewOptions, InputMediaPhoto, BufferedInputFile
+from aiogram.types import FSInputFile, LinkPreviewOptions, InputMediaPhoto, BufferedInputFile, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.exceptions import TelegramBadRequest
 
 from src.pipeline.digest_builder import DigestBuilder
@@ -175,28 +175,52 @@ class DigestScheduler:
                         logger.info(f"Обнаружено новое YouTube-видео у RossName: {link}")
                         self.builder.storage.mark_youtube_video_seen(link, it.get("title", ""))
 
-                        title = it.get("title", "Новое видео на YouTube")
-                        clean_text = re.sub(r'https?://\S+', '', content).strip()
-                        alert_html = (
-                            f"🎬 <b>НОВОЕ ВИДЕО: RossName на YouTube!</b>\n\n"
-                            f"📌 <b>{html.escape(title[:120])}</b>\n\n"
-                            f"{html.escape(clean_text[:400])}\n\n"
-                            f"🔗 <a href=\"{link}\">Смотреть видео на YouTube</a>"
-                        )
+                        # Очищаем текст от ссылок и пустых строк
+                        text_no_url = re.sub(r'https?://\S+', '', content)
+                        raw_lines = [line.strip() for line in text_no_url.splitlines()]
+                        raw_lines = [line for line in raw_lines if line]
+
+                        # Если смайлики/символы идут столбиком (короткие строки <= 4 симв.),
+                        # склеиваем их в одну аккуратную строку через пробел вместо гигантской лесенки
+                        compact_lines = []
+                        short_buf = []
+                        for line in raw_lines:
+                            if len(line) <= 4:
+                                short_buf.append(line)
+                            else:
+                                if short_buf:
+                                    compact_lines.append(" ".join(short_buf))
+                                    short_buf = []
+                                compact_lines.append(line)
+                        if short_buf:
+                            compact_lines.append(" ".join(short_buf))
+
+                        clean_desc = "\n".join(compact_lines).strip()
+
+                        # Формируем компактное, аккуратное сообщение без дублирования блоков
+                        alert_parts = ["🎬 <b>НОВОЕ ВИДЕО: RossName на YouTube!</b>"]
+                        if clean_desc:
+                            alert_parts.append(f"<blockquote>{html.escape(clean_desc[:400])}</blockquote>")
+                        alert_parts.append(f"🔗 <a href=\"{link}\">Смотреть видео на YouTube</a>")
+
+                        alert_html = "\n\n".join(alert_parts)
+                        reply_kb = InlineKeyboardMarkup(inline_keyboard=[
+                            [InlineKeyboardButton(text="🎬 Смотреть на YouTube", url=link)]
+                        ])
 
                         photo_file = None
                         if it.get("image_url"):
                             photo_file = await download_image_as_input_file(it["image_url"])
 
                         if photo_file and len(alert_html) <= 1024:
-                            await self.bot.send_photo(target_admin, photo=photo_file, caption=alert_html, parse_mode="HTML")
+                            await self.bot.send_photo(target_admin, photo=photo_file, caption=alert_html, parse_mode="HTML", reply_markup=reply_kb)
                         else:
                             if photo_file:
                                 try:
                                     await self.bot.send_photo(target_admin, photo=photo_file)
                                 except Exception:
                                     pass
-                            await self.bot.send_message(target_admin, alert_html, parse_mode="HTML")
+                            await self.bot.send_message(target_admin, alert_html, parse_mode="HTML", reply_markup=reply_kb)
         except Exception as e:
             logger.error(f"Ошибка при проверке YouTube-видео у RossName: {e}")
 
