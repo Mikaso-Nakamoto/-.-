@@ -1,0 +1,53 @@
+user:
+  name: "Пользователь"
+  timezone: "Europe/Moscow"
+  digest_time: "08:50"
+
+interests:
+  - name: "Нейросети, ИИ & Machine Learning"
+    keywords: ["нейросеть", "ии", "ai", "llm", "qwen", "llama", "deepseek", "openai", "gemini", "модель", "веса", "трансформер", "fine-tuning", "claude", "инференс", "локальная нейросеть"]
+    priority: "highest"
+
+  - name: "Интересные GitHub-репозитории, Полезный софт & Open-Source"
+    keywords: ["github", "репозиторий", "open source", "софт", "утилита", "инструмент", "бесплатно", "аналог", "photocraft", "wordcraft", "библиотека", "фреймворк", "клиент", "self-hosted", "релиз", "soft"]
+    priority: "highest"
+
+  - name: "Технологии, Hardware & IT-Разработка"
+    keywords: ["it", "технологии", "разработка", "python", "docker", "linux", "gpu", "nvidia", "чип", "архитектура", "код", "devops", "гаджеты", "3dnews", "habr"]
+    priority: "high"
+
+  - name: "Кибербезопасность & Инфобез"
+    keywords: ["кибербезопасность", "инфобез", "уязвимость", "cve", "0-day", "эксплойт", "взлом", "утечка", "хакер", "киберполиция", "патч", "malware", "reverse engineering"]
+    priority: "high"
+
+  - name: "Военная хроника, СВО & Безопасность регионов"
+    keywords: ["сво", "фронт", "ростов", "белгород", "курск", "атака", "удар", "дрон", "бпла", "пво", "мост", "терминал", "военкор", "минобороны", "бои", "обстрел"]
+    priority: "high"
+
+  - name: "Мировая геополитика & Международные отношения"
+    keywords: ["россия", "сша", "китай", "трамп", "путин", "переговоры", "санкции", "дипломатия", "нато", "ес", "ближний восток"]
+    priority: "high"
+
+  - name: "DevOps & Self-Hosted"
+    keywords: ["docker", "linux", "tailscale", "vpn", "ssh", "сервер", "wireguard", "self-hosted"]
+    priority: "medium"
+
+  - name: "Экономика и Финансы"
+    keywords: ["рынки", "ставка", "инфляция", "рубль", "доллар", "нефть", "газ", "цб", "акции"]
+    priority: "medium"
+
+filters:
+  # Жесткие стоп-слова для гарантированного отсечения скама (остальной отбор ведет ИИ-куратор)
+  blacklist:
+    - "казино"
+    - "ставки на спорт"
+    - "1win"
+    - "1xbet"
+    - "порно"
+    - "крипто-скам"
+
+formatting:
+  language: "ru"
+  summary_depth: "balanced" # concise, balanced, detailed
+  include_source_links: true
+  max_news_per_topic: 4

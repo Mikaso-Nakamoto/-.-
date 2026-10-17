@@ -1,0 +1,521 @@
+import sqlite3
+import hashlib
+import json
+import re
+from pathlib import Path
+from typing import List, Dict, Any, Optional
+from datetime import datetime
+import os
+
+class Storage:
+    def __init__(self, db_path: str):
+        self.path = Path(db_path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.learned_pref_file = self.path.parent.parent / "config" / "user_learned_preferences.txt"
+        # Тумблер тестового режима (1 / true): не помечать новости как прочитанные и не сохранять в БД
+        env_test = os.getenv("TEST_MODE", "").lower() in ["1", "true", "yes"] or os.getenv("SAVE_TO_DATABASE", "").lower() in ["0", "false", "no"]
+        self.default_test_mode = env_test if os.getenv("TEST_MODE") or os.getenv("SAVE_TO_DATABASE") else True
+        self._init_db()
+
+    def is_test_mode(self) -> bool:
+        """Проверяет состояние тумблера: если true/1, то данные никуда не сохраняются"""
+        setting = self.get_setting("test_mode_no_save")
+        if setting is not None:
+            return setting in ["1", "true", "True", "yes", "1"]
+        return self.default_test_mode
+
+    def set_test_mode(self, enabled: bool):
+        """Переключает тумблер тестового режима"""
+        self.set_setting("test_mode_no_save", "1" if enabled else "0")
+
+    def _get_connection(self) -> sqlite3.Connection:
+        if str(self.path) == ":memory:":
+            if not hasattr(self, "_mem_conn") or self._mem_conn is None:
+                self._mem_conn = sqlite3.connect(":memory:")
+                self._mem_conn.row_factory = sqlite3.Row
+            return self._mem_conn
+        conn = sqlite3.connect(self.path)
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def _init_db(self):
+        with self._get_connection() as conn:
+            conn.executescript("""
+                CREATE TABLE IF NOT EXISTS seen_items (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    item_hash TEXT UNIQUE,
+                    source_type TEXT,
+                    channel TEXT,
+                    url TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE TABLE IF NOT EXISTS user_settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT
+                );
+
+                CREATE TABLE IF NOT EXISTS digest_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    provider_used TEXT,
+                    items_count INTEGER,
+                    digest_text TEXT
+                );
+
+                CREATE TABLE IF NOT EXISTS chat_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    role TEXT,
+                    content TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE TABLE IF NOT EXISTS user_feedback (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    reaction TEXT,
+                    context TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE TABLE IF NOT EXISTS news_feed (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    item_hash TEXT UNIQUE,
+                    source_type TEXT,
+                    channel TEXT,
+                    category TEXT,
+                    title TEXT,
+                    content TEXT,
+                    url TEXT,
+                    image_url TEXT,
+                    published_at TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE TABLE IF NOT EXISTS full_digests (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    date_str TEXT,
+                    provider_used TEXT,
+                    model_used TEXT,
+                    post_html TEXT,
+                    report_md TEXT,
+                    report_html_path TEXT,
+                    report_md_path TEXT,
+                    lead_image_url TEXT
+                );
+            """)
+
+            # Безопасное добавление колонок для существующих БД
+            try:
+                conn.execute("ALTER TABLE news_feed ADD COLUMN image_url TEXT")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute("ALTER TABLE news_feed ADD COLUMN media_json TEXT")
+            except sqlite3.OperationalError:
+                pass
+
+            # Очистка от сатирических/пародийных каналов
+            try:
+                conn.execute("DELETE FROM news_feed WHERE LOWER(channel) LIKE '%neuralmeduza%'")
+            except Exception:
+                pass
+
+    def _hash_item(self, item: Dict[str, Any]) -> str:
+        unique_key = item.get("guid") or item.get("url") or item.get("title", "")
+        return hashlib.sha256(unique_key.encode("utf-8")).hexdigest()
+
+    def filter_unseen_items(self, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        # Если включен тумблер ТЕСТ — не отсекаем новости, отдаем все собранные для тестов
+        if self.is_test_mode():
+            for item in items:
+                item["item_hash"] = self._hash_item(item)
+            return items
+
+        unseen = []
+        with self._get_connection() as conn:
+            for item in items:
+                h = self._hash_item(item)
+                cur = conn.execute("SELECT 1 FROM seen_items WHERE item_hash = ?", (h,))
+                if not cur.fetchone():
+                    item["item_hash"] = h
+                    unseen.append(item)
+        return unseen
+
+    def mark_items_as_seen(self, items: List[Dict[str, Any]]):
+        # Если включен тумблер ТЕСТ — никуда не записываем во избежание скрытия новостей
+        if self.is_test_mode():
+            return
+
+        with self._get_connection() as conn:
+            for item in items:
+                h = item.get("item_hash") or self._hash_item(item)
+                conn.execute(
+                    "INSERT OR IGNORE INTO seen_items (item_hash, source_type, channel, url) VALUES (?, ?, ?, ?)",
+                    (h, item.get("source_type"), item.get("channel"), item.get("url"))
+                )
+
+    def save_news_items(self, items: List[Dict[str, Any]]):
+        with self._get_connection() as conn:
+            for it in items:
+                h = it.get("item_hash") or self._hash_item(it)
+                media_list = it.get("media_urls") or ([it.get("image_url")] if it.get("image_url") else [])
+                media_json_str = json.dumps(media_list, ensure_ascii=False) if media_list else ""
+                conn.execute("""
+                    INSERT OR REPLACE INTO news_feed 
+                    (item_hash, source_type, channel, category, title, content, url, image_url, media_json, published_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    h,
+                    it.get("source_type", "unknown"),
+                    it.get("channel", ""),
+                    it.get("category", "Общее"),
+                    it.get("title", ""),
+                    it.get("content", ""),
+                    it.get("url", ""),
+                    it.get("image_url", ""),
+                    media_json_str,
+                    it.get("published_at", "")
+                ))
+            # Ограничиваем буфер новостей последними 300 записями
+            conn.execute("DELETE FROM news_feed WHERE id NOT IN (SELECT id FROM news_feed ORDER BY id DESC LIMIT 300)")
+
+    def purge_all_news_and_digests(self):
+        """Полная зачистка старых новостей, хэшей и архивов дайджестов для чистого старта"""
+        with self._get_connection() as conn:
+            conn.execute("DELETE FROM seen_items")
+            conn.execute("DELETE FROM news_feed")
+            conn.execute("DELETE FROM full_digests")
+            conn.execute("DELETE FROM digest_history")
+            conn.execute("DELETE FROM chat_history")
+            conn.execute("DELETE FROM user_feedback")
+            conn.commit()
+            try:
+                conn.execute("VACUUM")
+            except Exception:
+                pass
+
+        # Удаляем локальные сгенерированные файлы дайджестов
+        from pathlib import Path
+        digests_dir = Path("data/digests")
+        if digests_dir.exists():
+            for f in digests_dir.glob("*.*"):
+                try:
+                    f.unlink()
+                except Exception:
+                    pass
+
+    def check_and_apply_one_time_clean(self, migration_key: str = "db_cleaned_commit_v2") -> bool:
+        """
+        Выполняет автоматическую однократную очистку БД и истории диалогов
+        при развертывании коммита, сохраняя настройки пользователя (admin_id, модели, провайдеры).
+        """
+        if not self.get_setting(migration_key):
+            self.purge_all_news_and_digests()
+            self.set_setting(migration_key, "completed")
+            return True
+        return False
+
+    def is_youtube_video_seen(self, video_url: str) -> bool:
+        """Проверяет, было ли уже отправлено уведомление об этом видео"""
+        with self._get_connection() as conn:
+            cur = conn.execute("SELECT 1 FROM seen_items WHERE url = ?", (video_url,))
+            return cur.fetchone() is not None
+
+    def mark_youtube_video_seen(self, video_url: str, title: str = ""):
+        """Фиксирует отправленное YouTube-видео во избежание дублей"""
+        with self._get_connection() as conn:
+            h = hashlib.sha256(video_url.encode("utf-8")).hexdigest()
+            conn.execute(
+                "INSERT OR IGNORE INTO seen_items (item_hash, source_type, channel, url) VALUES (?, ?, ?, ?)",
+                (h, "youtube_ross", "@ross_name", video_url)
+            )
+
+    def is_medvedev_post_seen(self, post_url: str) -> bool:
+        """Проверяет, было ли уже отправлено уведомление о посте Медведева"""
+        with self._get_connection() as conn:
+            cur = conn.execute("SELECT 1 FROM seen_items WHERE url = ?", (post_url,))
+            return cur.fetchone() is not None
+
+    def mark_medvedev_post_seen(self, post_url: str):
+        """Фиксирует отправленный пост Медведева во избежание дублей"""
+        with self._get_connection() as conn:
+            h = hashlib.sha256(post_url.encode("utf-8")).hexdigest()
+            conn.execute(
+                "INSERT OR IGNORE INTO seen_items (item_hash, source_type, channel, url) VALUES (?, ?, ?, ?)",
+                (h, "telegram_medvedev", "@medvedev_telegram", post_url)
+            )
+
+    def get_news_feed(self, limit: int = 60) -> List[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            cur = conn.execute(
+                "SELECT id, item_hash, source_type, channel, category, title, content, url, image_url, media_json, published_at, created_at FROM news_feed ORDER BY id DESC LIMIT ?",
+                (limit,)
+            )
+            rows = cur.fetchall()
+            items = []
+            for row in rows:
+                d = dict(row)
+                m_json = d.get("media_json")
+                if m_json:
+                    try:
+                        d["media_urls"] = json.loads(m_json)
+                    except Exception:
+                        d["media_urls"] = [d["image_url"]] if d.get("image_url") else []
+                else:
+                    d["media_urls"] = [d["image_url"]] if d.get("image_url") else []
+                items.append(d)
+            return items
+
+    def count_news_feed(self) -> int:
+        """Возвращает общее количество сохраненных постов в базе"""
+        with self._get_connection() as conn:
+            cur = conn.execute("SELECT COUNT(*) FROM news_feed")
+            row = cur.fetchone()
+            return row[0] if row else 0
+
+    def search_news_feed(self, query: str, limit: int = 50, fetch_depth: int = 800) -> List[Dict[str, Any]]:
+        """
+        Ищет публикации в базе данных по корням слов, семантическим категориям и ключевым терминам.
+        Не зависит от жестких хардкодов городов или тем — расширяет контекст по смысловым доменам
+        и собирает максимум фактуры со всех первоисточников.
+        """
+        words = re.findall(r'[а-яa-z0-9_-]+', query.lower())
+        stop_words = {
+            "что", "как", "где", "когда", "почему", "зачем", "это", "или", "для", "про", "был",
+            "была", "были", "быть", "все", "всё", "его", "она", "они", "том", "под", "при",
+            "над", "после", "этой", "этом", "этих", "какой", "какие", "расскажи", "пожалуйста",
+            "слышно", "известно", "инфа", "инфу", "информацию", "данные", "собери", "подробно",
+            "максимум", "хочу", "дай", "покажи"
+        }
+        stems = []
+        for w in words:
+            if len(w) <= 2 or w in stop_words:
+                continue
+            stem = re.sub(r'(?:овали|евали|ован|еван|али|яли|или|ила|ала|ели|ать|ять|ить|еть|ого|его|ому|ему|ыми|ими|ами|ями|ах|ях|ия|ие|ые|ое|ее|ом|ем|ой|ей|ам|ям|а|я|о|е|у|ю|ы|и)$', '', w)
+            stems.append(stem if len(stem) >= 3 else w)
+
+        all_items = self.get_news_feed(limit=fetch_depth)
+        if not stems:
+            # Общий запрос без конкретных ключевых слов — возвращаем самые свежие материалы
+            return all_items[:limit]
+
+        # Определение смысловых доменов запроса для релевантного расширения
+        q_full = query.lower()
+        is_military = any(k in q_full for k in [
+            "сво", "фронт", "войн", "бпла", "дрон", "удар", "пво", "атак", "прилет",
+            "наступлен", "снаряд", "миноборон", "всу", "вс рф", "ракета", "обстрел",
+            "курахов", "покровск", "купянск", "часов яр", "донецк", "белгород", "ростов",
+            "запорож", "херсон", "харьков", "крым", "киев", "днепр", "одесс", "николаев", "мост", "склад", "нефтебаз",
+            "оружи", "вооружен", "техник", "комплекс", "герань", "ланцет", "искандер",
+            "калибр", "кинжал", "циркон", "орешник", "су-57", "т-90", "бронетехник",
+            "птрк", "артиллери", "рэб", "оптоволокн", "князь вандал"
+        ])
+        is_software = any(k in q_full for k in [
+            "софт", "программ", "github", "утилит", "код", "репозитор", "разработ",
+            "opensource", "open-source", "лицензи", "инструмент", "библиотек",
+            "linux", "windows", "macos", "python", "docker", "ai", "нейросет"
+        ])
+        is_cyber = any(k in q_full for k in [
+            "кибер", "безопасн", "хакер", "уязвим", "взлом", "троян", "вирус",
+            "malware", "утечк", "cve", "мошенник", "атака", "эксплойт", "фишинг"
+        ])
+        is_geopolitics = any(k in q_full for k in [
+            "геополитик", "трамп", "сша", "нато", "ес", "китай", "санкци", "переговор",
+            "путин", "лавров", "кремл", "белый дом", "дипломат", "оон", "брикс"
+        ])
+
+        military_channels = {"voennaja_svodka", "infomil_live", "ross_name", "dyadyabatya0", "rybar", "tsargrad"}
+        software_channels = {"it_shelter", "github_radar", "habr", "opennet"}
+        cyber_channels = {"cyberpolice_rus", "xakep"}
+        geo_channels = {"rian", "tass", "kommersant"}
+
+        scored = []
+        for it in all_items:
+            title = (it.get("title") or "").lower()
+            content = (it.get("content") or "").lower()
+            ch = str(it.get("channel") or "").lower()
+            cat = str(it.get("category") or "").lower()
+
+            score = 0
+            matched_stems_count = 0
+
+            for s in stems:
+                in_title = s in title
+                in_content = s in content
+                if in_title:
+                    score += 45
+                    matched_stems_count += 1
+                elif in_content:
+                    score += 20
+                    matched_stems_count += 1
+
+            # Бонус плотности: если найдено сразу несколько разных ключевых корней из запроса
+            if matched_stems_count > 1:
+                score += matched_stems_count * 20
+
+            # Доменные соответствия
+            if is_military:
+                if any(mc in ch for mc in military_channels):
+                    score += 25
+                if any(mc in cat for mc in ["сво", "хроник", "военн"]):
+                    score += 20
+            if is_software:
+                if any(sc in ch for sc in software_channels):
+                    score += 30
+                if any(sc in cat for sc in ["софт", "open-source", "технолог"]):
+                    score += 25
+            if is_cyber:
+                if any(cc in ch for cc in cyber_channels):
+                    score += 30
+                if "кибер" in cat or "безопасн" in cat:
+                    score += 25
+            if is_geopolitics:
+                if any(gc in ch for gc in geo_channels):
+                    score += 20
+                if "геополитик" in cat or "мир" in cat:
+                    score += 15
+
+            # Наличие медиа/фотографий
+            if it.get("image_url") or it.get("media_urls"):
+                score += 5
+
+            # Длина и содержательность текста
+            if len(content) > 300:
+                score += 5
+
+            if score > 0:
+                scored.append((score, it))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return [it for _, it in scored[:limit]]
+
+    def save_digest(self, digest_text: str, provider: str, count: int):
+        if self.is_test_mode():
+            return
+        with self._get_connection() as conn:
+            conn.execute(
+                "INSERT INTO digest_history (provider_used, items_count, digest_text) VALUES (?, ?, ?)",
+                (provider, count, digest_text)
+            )
+
+    def get_latest_digest(self) -> Optional[str]:
+        with self._get_connection() as conn:
+            cur = conn.execute("SELECT digest_text FROM digest_history ORDER BY id DESC LIMIT 1")
+            row = cur.fetchone()
+            return row["digest_text"] if row else None
+
+    def save_full_digest(
+        self,
+        date_str: str,
+        provider: str,
+        model: str,
+        post_html: str,
+        report_md: str,
+        report_html_path: str,
+        report_md_path: str,
+        lead_image_url: str = ""
+    ) -> int:
+        if self.is_test_mode():
+            return 0
+        with self._get_connection() as conn:
+            cur = conn.execute("""
+                INSERT INTO full_digests 
+                (date_str, provider_used, model_used, post_html, report_md, report_html_path, report_md_path, lead_image_url)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                date_str, provider, model, post_html, report_md, report_html_path, report_md_path, lead_image_url
+            ))
+            return cur.lastrowid
+
+    def get_latest_full_digest(self) -> Optional[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            cur = conn.execute("SELECT * FROM full_digests ORDER BY id DESC LIMIT 1")
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+    def get_full_digest_by_id(self, digest_id: int) -> Optional[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            cur = conn.execute("SELECT * FROM full_digests WHERE id = ?", (digest_id,))
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+    # --------------------------------------------------------------------------
+    # Настройки и состояние (включая режим чата)
+    # --------------------------------------------------------------------------
+    def set_setting(self, key: str, value: str):
+        with self._get_connection() as conn:
+            conn.execute("INSERT OR REPLACE INTO user_settings (key, value) VALUES (?, ?)", (key, value))
+
+    def get_setting(self, key: str, default: Optional[str] = None) -> Optional[str]:
+        with self._get_connection() as conn:
+            cur = conn.execute("SELECT value FROM user_settings WHERE key = ?", (key,))
+            row = cur.fetchone()
+            return row["value"] if row else default
+
+    def is_chat_mode_active(self) -> bool:
+        return self.get_setting("chat_mode_active", "false") == "true"
+
+    def set_chat_mode(self, active: bool):
+        self.set_setting("chat_mode_active", "true" if active else "false")
+
+    def is_google_ai_search_enabled(self) -> bool:
+        """Включен ли поиск через Google 'Режим ИИ' (Gemini Search Grounding)"""
+        return self.get_setting("google_ai_search_enabled", "true") == "true"
+
+    def set_google_ai_search(self, enabled: bool):
+        """Переключает тумблер поиска через Google 'Режим ИИ'"""
+        self.set_setting("google_ai_search_enabled", "true" if enabled else "false")
+
+    # --------------------------------------------------------------------------
+    # История диалога
+    # --------------------------------------------------------------------------
+    def add_chat_message(self, role: str, content: str):
+        if self.is_test_mode():
+            return
+        with self._get_connection() as conn:
+            conn.execute("INSERT INTO chat_history (role, content) VALUES (?, ?)", (role, content))
+
+    def get_chat_history(self, limit: int = 8) -> List[Dict[str, str]]:
+        with self._get_connection() as conn:
+            cur = conn.execute("SELECT role, content FROM chat_history ORDER BY id DESC LIMIT ?", (limit,))
+            rows = cur.fetchall()
+            messages = [{"role": row["role"], "content": row["content"]} for row in reversed(rows)]
+            return messages
+
+    def clear_chat_history(self):
+        with self._get_connection() as conn:
+            conn.execute("DELETE FROM chat_history")
+
+    # --------------------------------------------------------------------------
+    # Обратная связь и обучаемый профиль предпочтений
+    # --------------------------------------------------------------------------
+    def record_feedback(self, reaction: str, context: str):
+        with self._get_connection() as conn:
+            conn.execute("INSERT INTO user_feedback (reaction, context) VALUES (?, ?)", (reaction, context[:400]))
+
+        # Запись в файл user_learned_preferences.txt на сервере
+        try:
+            self.learned_pref_file.parent.mkdir(parents=True, exist_ok=True)
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+            sentiment = "НРАВИТСЯ (👍)" if reaction in ["like", "positive", "👍", "🔥", "❤️"] else "НЕ НРАВИТСЯ (👎)"
+            clean_context = context.replace("\n", " ")[:200]
+            with open(self.learned_pref_file, "a", encoding="utf-8") as f:
+                f.write(f"[{timestamp}] {sentiment}: {clean_context}\n")
+        except Exception as e:
+            pass
+
+    def get_learned_preferences_summary(self) -> str:
+        if not self.learned_pref_file.exists():
+            return ""
+        try:
+            with open(self.learned_pref_file, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+            if not lines:
+                return ""
+            # Берем последние 15 записей
+            recent = lines[-15:]
+            return "".join(recent).strip()
+        except Exception:
+            return ""

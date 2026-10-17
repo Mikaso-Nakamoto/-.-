@@ -1,0 +1,60 @@
+# ------------------------------------------------------------------------------
+# РЕЕСТР ДОВЕРЕННЫХ ИСТОЧНИКОВ И ТРАСТВИКОВ («АГЕНТ СНОУДЕН»)
+# ------------------------------------------------------------------------------
+# Используется модулем trust_manager.py для верификации ссылок в поиске (Web),
+# маркировки уровня достоверности фактов и защиты от фишинга.
+
+# 1. КИБЕРБЕЗОПАСНОСТЬ, УЯЗВИМОСТИ И ЭКСПЛОЙТЫ
+cybersecurity_and_exploits:
+  - name: "NVD (National Vulnerability Database) & CVE"
+    domain: "nvd.nist.gov"
+    category: "Официальная база уязвимостей CVE"
+    trust: "verified"
+
+  - name: "Exploit-DB"
+    domain: "exploit-db.com"
+    category: "Репозиторий эксплойтов и PoC"
+    trust: "verified"
+
+  - name: "GitHub Security Advisories"
+    domain: "github.com"
+    category: "База уязвимостей Open-Source проектов"
+    trust: "verified"
+
+  - name: "BleepingComputer"
+    domain: "bleepingcomputer.com"
+    category: "Оперативная киберразведка и атаки шифровальщиков"
+    trust: "reputable"
+
+  - name: "Журнал «Хакер»"
+    domain: "xakep.ru"
+    category: "Практическая информационная безопасность и разбор эксплойтов"
+    trust: "reputable"
+
+  - name: "Habr (Информационная безопасность)"
+    domain: "habr.com"
+    category: "Профильное IT-сообщество и реверс-инжиниринг"
+    trust: "reputable"
+
+# 3. ОБЪЕКТИВНЫЙ КОНТРОЛЬ И ФАКТЧЕКИНГ ПО СВО И ГЕОПОЛИТИКЕ
+osint_and_factchecking:
+  - name: "LostArmour"
+    domain: "lostarmour.info"
+    category: "База объективного контроля (фото/видео/геолокация)"
+    trust: "verified"
+    description: "Верификация поражений техники, ударов по объектам строго по фото- и видеодоказательствам."
+
+  - name: "Военная летопись"
+    domain: "voenndelo.com"
+    category: "Военная аналитика и разбор ударов"
+    trust: "reputable"
+
+  - name: "Рыбарь (Хроника и геопривязанные карты)"
+    domain: "rybar.ru"
+    category: "Геолоцированные сводки и тактическая обстановка"
+    trust: "reputable"
+
+  - name: "Warspotting"
+    domain: "warspotting.net"
+    category: "OSINT-база фотофиксации бронетехники"
+    trust: "reputable"
